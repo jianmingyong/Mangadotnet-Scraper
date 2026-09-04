@@ -8,9 +8,11 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import questionary
+from aiohttp import ClientConnectionError, ClientResponseError
 from aiohttp.client_exceptions import ClientError
 from questionary import Choice
-from rich.console import Console, Group
+from rich import get_console
+from rich.console import Group
 from rich.live import Live
 from rich.progress import (
     BarColumn,
@@ -43,13 +45,12 @@ def initialize() -> None:
 
     try:
         asyncio.run(initialize_async())
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, SystemExit:
         pass
 
 
 async def initialize_async() -> None:
-    console = Console(color_system="auto")
-    console.rule("MangaDotNet Scraper and Uploader")
+    get_console().rule("MangaDotNet Scraper and Uploader")
 
     config = MangaDotNetScraperConfig()
     config.load_config()
@@ -81,16 +82,16 @@ async def initialize_async() -> None:
 
                     if selection == 1:
                         async with ArtLapsaModule(config) as module:
-                            await fetch_module_listing(console, module, data)
+                            await fetch_module_listing(module, data)
 
                         async with RitharScansModule(config) as module:
-                            await fetch_module_listing(console, module, data)
+                            await fetch_module_listing(module, data)
                     elif selection == 2:
                         async with ArtLapsaModule(config) as module:
-                            await fetch_module_listing(console, module, data)
+                            await fetch_module_listing(module, data)
                     elif selection == 3:
                         async with RitharScansModule(config) as module:
-                            await fetch_module_listing(console, module, data)
+                            await fetch_module_listing(module, data)
                     else:
                         continue
                 elif selection == 2:
@@ -107,32 +108,24 @@ async def initialize_async() -> None:
                     if selection == 1:
                         async with MangaBakaApi() as mangabaka_api, MangaDotNetApi(config) as mangadotnet_api:
                             async with ArtLapsaModule(config) as module:
-                                await fetch_module_listing_details(
-                                    console, module, config, data, mangabaka_api, mangadotnet_api, False
-                                )
+                                await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
 
                             async with RitharScansModule(config) as module:
-                                await fetch_module_listing_details(
-                                    console, module, config, data, mangabaka_api, mangadotnet_api, False
-                                )
+                                await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
                     elif selection == 2:
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
                             ArtLapsaModule(config) as module,
                         ):
-                            await fetch_module_listing_details(
-                                console, module, config, data, mangabaka_api, mangadotnet_api
-                            )
+                            await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
                     elif selection == 3:
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
                             RitharScansModule(config) as module,
                         ):
-                            await fetch_module_listing_details(
-                                console, module, config, data, mangabaka_api, mangadotnet_api
-                            )
+                            await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
                     else:
                         continue
                 elif selection == 3:
@@ -150,12 +143,24 @@ async def initialize_async() -> None:
                         async with MangaBakaApi() as mangabaka_api, MangaDotNetApi(config) as mangadotnet_api:
                             async with ArtLapsaModule(config) as module:
                                 await fetch_module_listing_details(
-                                    console, module, config, data, mangabaka_api, mangadotnet_api, skip_mapping=True
+                                    module,
+                                    config,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                    only_old_entries=False,
+                                    skip_mapping=True,
                                 )
 
                             async with RitharScansModule(config) as module:
                                 await fetch_module_listing_details(
-                                    console, module, config, data, mangabaka_api, mangadotnet_api, skip_mapping=True
+                                    module,
+                                    config,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                    only_old_entries=False,
+                                    skip_mapping=True,
                                 )
                     elif selection == 2:
                         async with (
@@ -164,7 +169,13 @@ async def initialize_async() -> None:
                             ArtLapsaModule(config) as module,
                         ):
                             await fetch_module_listing_details(
-                                console, module, config, data, mangabaka_api, mangadotnet_api, skip_mapping=True
+                                module,
+                                config,
+                                data,
+                                mangabaka_api,
+                                mangadotnet_api,
+                                only_old_entries=False,
+                                skip_mapping=True,
                             )
                     elif selection == 3:
                         async with (
@@ -173,7 +184,13 @@ async def initialize_async() -> None:
                             RitharScansModule(config) as module,
                         ):
                             await fetch_module_listing_details(
-                                console, module, config, data, mangabaka_api, mangadotnet_api, skip_mapping=True
+                                module,
+                                config,
+                                data,
+                                mangabaka_api,
+                                mangadotnet_api,
+                                only_old_entries=False,
+                                skip_mapping=True,
                             )
                     else:
                         continue
@@ -191,16 +208,16 @@ async def initialize_async() -> None:
                     if selection == 1:
                         async with MangaDotNetApi(config) as mangadotnet_api:
                             async with ArtLapsaModule(config) as module:
-                                await upload_chapters(console, module, config, data, mangadotnet_api)
+                                await upload_chapters(module, config, data, mangadotnet_api)
 
                             async with RitharScansModule(config) as module:
-                                await upload_chapters(console, module, config, data, mangadotnet_api)
+                                await upload_chapters(module, config, data, mangadotnet_api)
                     elif selection == 2:
                         async with MangaDotNetApi(config) as mangadotnet_api, ArtLapsaModule(config) as module:
-                            await upload_chapters(console, module, config, data, mangadotnet_api)
+                            await upload_chapters(module, config, data, mangadotnet_api)
                     elif selection == 3:
                         async with MangaDotNetApi(config) as mangadotnet_api, RitharScansModule(config) as module:
-                            await upload_chapters(console, module, config, data, mangadotnet_api)
+                            await upload_chapters(module, config, data, mangadotnet_api)
                     else:
                         continue
                 else:
@@ -209,11 +226,9 @@ async def initialize_async() -> None:
         config.save_config()
 
 
-async def fetch_module_listing(console: Console, module: BaseModule, data: MangaDotNetScraperData):
-    with Progress(
-        SpinnerColumn(), TextColumn(f"Fetching {module.display_name} Listing"), console=console, transient=True
-    ) as progress:
-        progress.add_task("", total=None)
+async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData):
+    with Progress(SpinnerColumn(), TextColumn("Fetching {task.description} Listing"), transient=True) as progress:
+        progress.add_task(module.display_name, total=None)
 
         try:
             async for title, link in module.fetch_manga_listing():
@@ -226,7 +241,6 @@ async def fetch_module_listing(console: Console, module: BaseModule, data: Manga
 
 
 async def fetch_module_listing_details(
-    console: Console,
     module: BaseModule,
     config: MangaDotNetScraperConfig,
     data: MangaDotNetScraperData,
@@ -234,21 +248,20 @@ async def fetch_module_listing_details(
     mangadotnet_api: MangaDotNetApi,
     only_old_entries: bool = True,
     skip_mapping: bool = False,
-):
+) -> None:
     total_progress = Progress(
-        TextColumn(f"Fetching {module.display_name} Details"),
+        TextColumn("Fetching {task.description} Details"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
-        console=console,
     )
 
-    current_progress = Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console)
+    current_progress = Progress(SpinnerColumn(), TextColumn("Fetching: {task.description}"))
 
-    with Live(Group(total_progress, Rule(), current_progress), console=console, transient=True):
+    with Live(Group(total_progress, Rule(), current_progress), transient=True):
         listing_count, listing = data.get_module_listing(module.module_id, only_old_entries)
-        total_progress_task_id = total_progress.add_task("", total=listing_count)
+        total_progress_task_id = total_progress.add_task(module.display_name, total=listing_count)
 
-        semaphore = asyncio.Semaphore(config.fetch_concurrency)
+        semaphore = Semaphore(config.fetch_concurrency)
 
         async def fetch_manga_detail_task(
             rowid: int,
@@ -259,7 +272,7 @@ async def fetch_module_listing_details(
             manual_override: bool,
         ) -> None:
             async with semaphore:
-                task_id = current_progress.add_task(f"Fetching: {title}")
+                task_id = current_progress.add_task(title)
 
                 try:
                     detail = await module.fetch_manga_detail(link)
@@ -321,7 +334,7 @@ async def fetch_module_listing_details(
 
                     data.add_module_manga(rowid, module_manga)
                 except ClientError:
-                    pass
+                    total_progress.print(f"Error fetching {title}")
                 finally:
                     current_progress.remove_task(task_id)
                     total_progress.advance(total_progress_task_id)
@@ -336,14 +349,15 @@ async def fetch_module_listing_details(
 
 
 async def upload_chapters(
-    console: Console,
     module: BaseModule,
     config: MangaDotNetScraperConfig,
     data: MangaDotNetScraperData,
     mangadotnet_api: MangaDotNetApi,
 ):
-    total_progress = Progress(TextColumn("Overall"), BarColumn(bar_width=None), MofNCompleteColumn(), console=console)
-    current_progress_title = Progress(TextColumn("{task.fields[status]}"), console=console)
+    total_progress = Progress(
+        TextColumn("Upload {task.description} Overall"), BarColumn(bar_width=None), MofNCompleteColumn()
+    )
+    current_progress_title = Progress(TextColumn("{task.fields[status]}"))
 
     current_progress = Progress(
         SpinnerColumn(),
@@ -353,18 +367,18 @@ async def upload_chapters(
         DownloadColumn(),
         TransferSpeedColumn(),
         TimeRemainingColumn(),
-        console=console,
     )
 
-    with Live(Group(total_progress, Rule(), current_progress_title, current_progress), console=console, transient=True):
+    with Live(Group(total_progress, Rule(), current_progress_title, current_progress), transient=True):
         manga_count, manga = data.get_non_uploaded_manga(module.module_id)
-        total_progress_task = total_progress.add_task("", total=manga_count)
+        total_progress_task = total_progress.add_task(module.display_name, total=manga_count)
         current_progress_title_task = current_progress_title.add_task("", status="")
 
         for rowid, link, title, mangadotnet_id in manga:
             current_progress_title.update(current_progress_title_task, status=f"Uploading: {title}")
 
             _chapters_count, chapters = data.get_chapters(rowid, False)
+
             chapters = [
                 (ref_id, language, scanlator_group, number, chapter_title, link)
                 for ref_id, language, scanlator_group, number, chapter_title, link in chapters
@@ -374,14 +388,14 @@ async def upload_chapters(
 
             async def upload_chapter_task(
                 upload_semaphore: Semaphore,
-                mangadotnet_id,
-                ref_id,
-                language,
-                scanlator_group,
-                chapter_number,
-                chapter_title,
-                chapter_link,
-                manga_link,
+                mangadotnet_id: int,
+                ref_id: int,
+                language: str,
+                scanlator_group: str,
+                chapter_number: float,
+                chapter_title: str,
+                chapter_link: str,
+                manga_link: str,
             ) -> None:
                 async with upload_semaphore:
                     task_id = current_progress.add_task(
@@ -399,19 +413,37 @@ async def upload_chapters(
                         current_progress.update(task_id, total=pages_count, status="Downloading Image")
 
                         zip_buffer = BytesIO()
+                        has_error = False
 
                         with ZipFile(zip_buffer, "a", ZIP_DEFLATED, compresslevel=9) as zip_file:
                             download_semaphore = Semaphore(config.download_concurrency)
 
                             async def download_image_task(page: MangaPage) -> None:
                                 async with download_semaphore:
-                                    image = await module.fetch_manga_image(page)
-                                    zip_file.writestr(image.filename, image.data)
-                                    current_progress.advance(task_id)
+                                    retry_duration = 2
 
-                            async with TaskGroup() as group:
-                                for page in pages:
-                                    group.create_task(download_image_task(page))
+                                    for retry_count in range(config.download_max_retry):
+                                        try:
+                                            image = await module.fetch_manga_image(page)
+                                            zip_file.writestr(image.filename, image.data)
+                                            current_progress.advance(task_id)
+                                            break
+                                        except ClientConnectionError:
+                                            if retry_count + 1 == config.download_max_retry:
+                                                raise
+
+                                            await sleep(retry_duration)
+                                            retry_duration *= 2
+
+                            try:
+                                async with TaskGroup() as group:
+                                    for page in pages:
+                                        group.create_task(download_image_task(page))
+                            except* ClientConnectionError:
+                                has_error = True
+
+                        if has_error:
+                            return
 
                         zip_file_size = zip_buffer.tell()
 
@@ -429,22 +461,27 @@ async def upload_chapters(
                         if group_id is None:
                             return
 
-                        location = await mangadotnet_api.prepare_upload(
-                            zip_file_size,
-                            MangaDotNetApi.MangaDotNetTusUploadMetadata(
-                                mangadotnet_id,
-                                chapter_number,
-                                None,
-                                language,
-                                chapter_title,
-                                [group_id],
-                                None,
-                                None,
-                                "chapter",
-                                None,
-                                None,
-                            ),
-                        )
+                        try:
+                            location = await mangadotnet_api.prepare_upload(
+                                zip_file_size,
+                                MangaDotNetApi.MangaDotNetTusUploadMetadata(
+                                    mangadotnet_id,
+                                    chapter_number,
+                                    None,
+                                    language,
+                                    chapter_title,
+                                    [group_id],
+                                    None,
+                                    None,
+                                    "chapter",
+                                    None,
+                                    None,
+                                ),
+                            )
+                        except ClientResponseError as error:
+                            if error.code == 409:
+                                data.mark_chapter_uploaded(ref_id, language, scanlator_group, chapter_number)
+                            return
 
                         def callable_progress(current):
                             current_progress.update(task_id, completed=current, status="Uploading")
@@ -453,7 +490,7 @@ async def upload_chapters(
 
                         success = await mangadotnet_api.upload_file(location, zip_buffer, callable_progress)
 
-                        logging.info(  # noqa: LOG015
+                        logging.getLogger().info(
                             f"Chapter Uploaded: [{mangadotnet_id}] {language}:{chapter_number} {chapter_title} [{group_id}]"
                         )
 
@@ -498,13 +535,13 @@ async def upload_chapters(
                             duration = monotonic() - start_check
                             current_progress.update(task_id, status=f"Verify Upload ({duration:.0f}s)")
 
-                            if duration > 120:
+                            if duration > config.upload_verify_duration:
                                 break
 
                         if found:
                             data.mark_chapter_uploaded(ref_id, language, scanlator_group, chapter_number)
-                    except ClientError, InterruptedError:
-                        return
+                    except ClientError:
+                        pass
                     finally:
                         current_progress.remove_task(task_id)
 

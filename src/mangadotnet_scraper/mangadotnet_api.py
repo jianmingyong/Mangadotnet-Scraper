@@ -1,6 +1,6 @@
-from asyncio import sleep
 import asyncio
 import json
+from asyncio import sleep
 from base64 import b64encode
 from collections import Counter
 from collections.abc import Callable
@@ -69,13 +69,13 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     _TUS_VERSION = "1.0.0"
     _TUS_MAX_UPLOAD_SIZE = 900 * 1024 * 1024
-    _TUS_CHUNK_SIZE = 4 * 1024 * 1024
 
     _NON_RESUMABLE_ERROR: Final[list[int]] = [400, 401, 403, 404, 409, 413, 422]
 
     _config: Final[MangaDotNetScraperConfig]
     _session: Final[ClientSession]
     _user_session_cookie: str | None
+    _tus_chunk_size: int
 
     @staticmethod
     def _resolve_ptr_table_json(table: list[Any], index: int) -> Any | list[Any] | dict[str, Any]:
@@ -128,6 +128,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         self._config = config
         self._session = create_client(base_url=self._BASE_API_URL)
         self._user_session_cookie = config.mangadotnet_user_session
+        self._tus_chunk_size = config.upload_chunk_size
 
     async def __aenter__(self):
         await self.initialize()
@@ -493,14 +494,15 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             response.raise_for_status()
             return int(response.headers.get("Upload-Offset", 0))
 
-    async def upload_file(self, location: str, file: BinaryIO, progress: Callable[[int], None]):
+    async def upload_file(self, location: str, file: BinaryIO, progress: Callable[[int], None], max_retry=5):
         offset = await self.get_upload_offset(location)
         need_new_offset = False
         retry = 0
+        retry_duration = 2
 
         while True:
             try:
-                if retry > 5:
+                if retry > max_retry:
                     return False
 
                 if need_new_offset:
@@ -509,7 +511,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
                 file.seek(offset)
 
-                data: bytes = file.read(self._TUS_CHUNK_SIZE)
+                data: bytes = file.read(self._tus_chunk_size)
 
                 if len(data) == 0:
                     break
@@ -524,25 +526,28 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     },
                     data=data,
                 ) as response:
-                    if response.ok:
-                        offset = int(response.headers.get("Upload-Offset", 0))
-                        progress(offset)
-                        continue
-                    else:
-                        response.raise_for_status()
+                    response.raise_for_status()
+                    
+                    offset = int(response.headers.get("Upload-Offset", 0))
+                    progress(offset)
+                    
+                    retry = 0
+                    retry_duration = 2
             except ClientError as error:
                 if isinstance(error, ClientResponseError):
                     if error.status in self._NON_RESUMABLE_ERROR:
                         raise
                     else:
                         # Some error occured but we can probably resume
-                        await asyncio.sleep(5)
-                        continue
+                        await asyncio.sleep(retry_duration)
+                        retry += 1
+                        retry_duration *= 2
                 elif isinstance(error, ClientConnectionError):
                     # Client got disconnected and needed time to recover.
-                    await asyncio.sleep(5)
-                    continue
-            except KeyboardInterrupt:
+                    await asyncio.sleep(retry_duration)
+                    retry += 1
+                    retry_duration *= 2
+            except KeyboardInterrupt, SystemExit:
                 return False
 
         return True

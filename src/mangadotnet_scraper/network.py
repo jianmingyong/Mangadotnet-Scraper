@@ -16,7 +16,7 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 def create_client(limit=100, **kwargs) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, limit=limit)
-    return ClientSession(connector=connector, middlewares=(CloudflareMiddleware(),), **kwargs)
+    return ClientSession(connector=connector, middlewares=[CloudflareMiddleware()], **kwargs)
 
 
 class Middleware(ABC):

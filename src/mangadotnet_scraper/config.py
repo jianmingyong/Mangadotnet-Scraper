@@ -11,8 +11,10 @@ class MangaDotNetScraperConfig:
         fetch_concurrency: int | None
 
         download_concurrency: int | None
+        download_max_retry: int | None
 
         upload_concurrency: int | None
+        upload_chunk_size: int | None
         upload_verify_duration: int | None
 
     _CONFIG_FILE_PATH: Final[str] = "./config.json"
@@ -25,9 +27,11 @@ class MangaDotNetScraperConfig:
         "fetch_concurrency": 12,
 
         "download_concurrency": 12,
+        "download_max_retry": 5,
 
         "upload_concurrency": 10,
-        "upload_verify_duration": 120,
+        "upload_chunk_size": 4 * 1024 * 1024,
+        "upload_verify_duration": 60,
     }
 
     def __init__(self):
@@ -60,9 +64,19 @@ class MangaDotNetScraperConfig:
         return value if value is not None else 12
 
     @property
+    def download_max_retry(self) -> int:
+        value: int | None = self._data.get("download_max_retry")
+        return value if value is not None else 5
+
+    @property
     def upload_concurrency(self) -> int:
         value: int | None = self._data.get("upload_concurrency")
         return value if value is not None else 10
+
+    @property
+    def upload_chunk_size(self) -> int:
+        value: int | None = self._data.get("upload_chunk_size")
+        return value if value is not None else 4 * 1024 * 1024
 
     @property
     def upload_verify_duration(self) -> int:
