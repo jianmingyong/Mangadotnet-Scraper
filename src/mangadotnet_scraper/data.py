@@ -197,7 +197,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             return count.fetchone()[0], self._execute(
                 t"""
-                SELECT ref_id, language, scanlator_group, number, chapter_title, link
+                SELECT ref_id, language, scanlator_group, number, chapter_title, link, skip_upload
                 FROM module_chapter
                 WHERE ref_id = {ref_id}
                 ORDER BY language, scanlator_group, number;
@@ -214,7 +214,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             return count.fetchone()[0], self._execute(
                 t"""
-                SELECT ref_id, language, scanlator_group, number, chapter_title, link
+                SELECT ref_id, language, scanlator_group, number, chapter_title, link, skip_upload
                 FROM module_chapter
                 WHERE ref_id = {ref_id} AND uploaded = {uploaded}
                 ORDER BY language, scanlator_group, number;

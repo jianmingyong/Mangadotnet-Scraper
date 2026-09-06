@@ -16,7 +16,7 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 def create_client(limit=100, **kwargs) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, limit=limit)
-    return ClientSession(connector=connector, middlewares=[CloudflareMiddleware()], **kwargs)
+    return ClientSession(connector=connector, middlewares=[CloudflareMiddleware(), RetryAfterMiddleware()], **kwargs)
 
 
 class Middleware(ABC):
@@ -32,7 +32,9 @@ class RetryMiddleware(Middleware):
         self._max_retry_count = max_retry_count
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        response: ClientResponse = request.response if isinstance(request.response, ClientResponse) else await handler(request)
+        response: ClientResponse = (
+            request.response if isinstance(request.response, ClientResponse) else await handler(request)
+        )
         retry_delay: int = 2
 
         for _ in range(self._max_retry_count):
@@ -42,6 +44,20 @@ class RetryMiddleware(Middleware):
                 await sleep(retry_delay)
                 retry_delay *= 2
                 response = await handler(request)
+
+        return response
+
+
+class RetryAfterMiddleware(Middleware):
+    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+        response: ClientResponse = (
+            request.response if isinstance(request.response, ClientResponse) else await handler(request)
+        )
+
+        if response.status == 429:
+            retry_timer = response.headers.get("Retry-After", "2")
+            await sleep(int(retry_timer))
+            response = await handler(request)
 
         return response
 
@@ -68,7 +84,9 @@ class CloudflareMiddleware(Middleware):
 
             return await handler(request)
 
-        response: ClientResponse = request.response if isinstance(request.response, ClientResponse) else await update_and_request()
+        response: ClientResponse = (
+            request.response if isinstance(request.response, ClientResponse) else await update_and_request()
+        )
 
         if response.headers.get("cf-mitigated") == "challenge":
             data: tuple[str, str] | None = await get_cloudflare_cookies(str(request.url))

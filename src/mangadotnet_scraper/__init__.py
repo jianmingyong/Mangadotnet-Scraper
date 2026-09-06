@@ -31,7 +31,7 @@ from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.data import MangaDotNetScraperData, ModuleChapter, ModuleManga
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.modules import ArtLapsaModule, BaseModule, MangaPage, RitharScansModule
+from mangadotnet_scraper.modules import ArtLapsaModule, BaseModule, EzMangaModule, MangaPage, RitharScansModule
 
 
 def initialize() -> None:
@@ -76,6 +76,7 @@ async def initialize_async() -> None:
                             Choice("All", 1),
                             Choice("Fetch Art Lapsa", 2),
                             Choice("Fetch Rithar Scans", 3),
+                            Choice("Fetch EzManga", 4),
                             Choice("Back", -1),
                         ],
                     ).ask_async()
@@ -86,11 +87,17 @@ async def initialize_async() -> None:
 
                         async with RitharScansModule(config) as module:
                             await fetch_module_listing(module, data)
+
+                        async with EzMangaModule(config) as module:
+                            await fetch_module_listing(module, data)
                     elif selection == 2:
                         async with ArtLapsaModule(config) as module:
                             await fetch_module_listing(module, data)
                     elif selection == 3:
                         async with RitharScansModule(config) as module:
+                            await fetch_module_listing(module, data)
+                    elif selection == 4:
+                        async with EzMangaModule(config) as module:
                             await fetch_module_listing(module, data)
                     else:
                         continue
@@ -101,6 +108,7 @@ async def initialize_async() -> None:
                             Choice("All", 1),
                             Choice("Fetch Art Lapsa", 2),
                             Choice("Fetch Rithar Scans", 3),
+                            Choice("Fetch EzManga", 4),
                             Choice("Back", -1),
                         ],
                     ).ask_async()
@@ -116,20 +124,38 @@ async def initialize_async() -> None:
                                 await fetch_module_listing_details(
                                     module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
                                 )
+
+                            async with EzMangaModule(config) as module:
+                                await fetch_module_listing_details(
+                                    module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                                )
                     elif selection == 2:
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
                             ArtLapsaModule(config) as module,
                         ):
-                            await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
+                            await fetch_module_listing_details(
+                                module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                            )
                     elif selection == 3:
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
                             RitharScansModule(config) as module,
                         ):
-                            await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
+                            await fetch_module_listing_details(
+                                module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                            )
+                    elif selection == 4:
+                        async with (
+                            MangaBakaApi() as mangabaka_api,
+                            MangaDotNetApi(config) as mangadotnet_api,
+                            EzMangaModule(config) as module,
+                        ):
+                            await fetch_module_listing_details(
+                                module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                            )
                     else:
                         continue
                 elif selection == 3:
@@ -139,6 +165,7 @@ async def initialize_async() -> None:
                             Choice("All", 1),
                             Choice("Fetch Art Lapsa", 2),
                             Choice("Fetch Rithar Scans", 3),
+                            Choice("Fetch EzManga", 4),
                             Choice("Back", -1),
                         ],
                     ).ask_async()
@@ -157,6 +184,17 @@ async def initialize_async() -> None:
                                 )
 
                             async with RitharScansModule(config) as module:
+                                await fetch_module_listing_details(
+                                    module,
+                                    config,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                    only_old_entries=False,
+                                    skip_mapping=True,
+                                )
+
+                            async with EzMangaModule(config) as module:
                                 await fetch_module_listing_details(
                                     module,
                                     config,
@@ -186,6 +224,21 @@ async def initialize_async() -> None:
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
                             RitharScansModule(config) as module,
+                        ):
+                            await fetch_module_listing_details(
+                                module,
+                                config,
+                                data,
+                                mangabaka_api,
+                                mangadotnet_api,
+                                only_old_entries=False,
+                                skip_mapping=True,
+                            )
+                    elif selection == 4:
+                        async with (
+                            MangaBakaApi() as mangabaka_api,
+                            MangaDotNetApi(config) as mangadotnet_api,
+                            EzMangaModule(config) as module,
                         ):
                             await fetch_module_listing_details(
                                 module,
@@ -205,6 +258,7 @@ async def initialize_async() -> None:
                             Choice("All", 1),
                             Choice("Upload Art Lapsa", 2),
                             Choice("Upload Rithar Scans", 3),
+                            Choice("Upload EzManga", 4),
                             Choice("Back", -1),
                         ],
                     ).ask_async()
@@ -216,11 +270,17 @@ async def initialize_async() -> None:
 
                             async with RitharScansModule(config) as module:
                                 await upload_chapters(module, config, data, mangadotnet_api)
+
+                            async with EzMangaModule(config) as module:
+                                await upload_chapters(module, config, data, mangadotnet_api)
                     elif selection == 2:
                         async with MangaDotNetApi(config) as mangadotnet_api, ArtLapsaModule(config) as module:
                             await upload_chapters(module, config, data, mangadotnet_api)
                     elif selection == 3:
                         async with MangaDotNetApi(config) as mangadotnet_api, RitharScansModule(config) as module:
+                            await upload_chapters(module, config, data, mangadotnet_api)
+                    elif selection == 4:
+                        async with MangaDotNetApi(config) as mangadotnet_api, EzMangaModule(config) as module:
                             await upload_chapters(module, config, data, mangadotnet_api)
                     else:
                         continue
@@ -385,7 +445,7 @@ async def upload_chapters(
     total_progress = Progress(
         TextColumn("Upload {task.description} Overall"), BarColumn(bar_width=None), MofNCompleteColumn()
     )
-    current_progress_title = Progress(TextColumn("{task.fields[status]}"))
+    current_progress_title = Progress(TextColumn("{task.fields[status]} ({task.fields[count]})"))
 
     current_progress = Progress(
         SpinnerColumn(),
@@ -403,13 +463,15 @@ async def upload_chapters(
         current_progress_title_task = current_progress_title.add_task("", status="")
 
         for rowid, link, title, mangadotnet_id in manga:
-            current_progress_title.update(current_progress_title_task, status=f"Uploading: {title}")
+            current_progress_title.update(current_progress_title_task, status=f"Uploading: {title}", count=0)
 
-            _chapters_count, chapters = data.get_chapters(rowid, False)
+            chapters_count, chapters = data.get_chapters(rowid, False)
+            
+            current_progress_title.update(current_progress_title_task, count=chapters_count)
 
             chapters = [
-                (ref_id, language, scanlator_group, number, chapter_title, link)
-                for ref_id, language, scanlator_group, number, chapter_title, link in chapters
+                (ref_id, language, scanlator_group, number, chapter_title, link, skip_upload)
+                for ref_id, language, scanlator_group, number, chapter_title, link, skip_upload in chapters
             ]
 
             upload_semaphore = Semaphore(config.upload_concurrency)
@@ -574,7 +636,10 @@ async def upload_chapters(
                         current_progress.remove_task(task_id)
 
             async with TaskGroup() as group:
-                for ref_id, language, scanlator_group, number, chapter_title, chapter_link in chapters:
+                for ref_id, language, scanlator_group, number, chapter_title, chapter_link, skip_upload in chapters:
+                    if skip_upload:
+                        continue
+
                     group.create_task(
                         upload_chapter_task(
                             upload_semaphore,
