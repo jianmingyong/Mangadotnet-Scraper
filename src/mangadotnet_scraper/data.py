@@ -52,7 +52,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                     mangabaka_id    INTEGER DEFAULT NULL,
                     mangadotnet_id  INTEGER DEFAULT NULL,
                     last_checked    INTEGER DEFAULT NULL,
-                    manual_override INTEGER DEFAULT 0,
+                    manual_override INTEGER DEFAULT 0 NOT NULL,
                     UNIQUE (module_id, link)
                 );
                 """
@@ -63,12 +63,13 @@ class MangaDotNetScraperData(AbstractContextManager):
                 CREATE TABLE IF NOT EXISTS module_chapter
                 (
                     ref_id          INTEGER NOT NULL,
-                    language        TEXT NOT NULL DEFAULT "en",
+                    language        TEXT DEFAULT "en" NOT NULL,
                     scanlator_group TEXT NOT NULL,
                     number          REAL NOT NULL,
                     chapter_title   TEXT NOT NULL,
                     link            TEXT NOT NULL,
-                    uploaded        INTEGER DEFAULT 0,
+                    uploaded        INTEGER DEFAULT 0 NOT NULL,
+                    skip_upload     INTEGER DEFAULT 0 NOT NULL,
                     FOREIGN KEY (ref_id) REFERENCES module_manga (rowid) ON DELETE CASCADE,
                     UNIQUE (ref_id, language, scanlator_group, number ASC)
                 );
@@ -96,7 +97,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                 t"INSERT OR IGNORE INTO module_manga(module_id, link, title) VALUES ({module_id}, {link}, {title});"
             )
 
-    def get_module_listing(self, module_id: str, only_old_entries: bool = True, only_unmapped_entries: bool = False) -> tuple[int, Cursor]:
+    def get_module_listing(
+        self, module_id: str, only_old_entries: bool = True, only_unmapped_entries: bool = True
+    ) -> tuple[int, Cursor]:
         if only_old_entries:
             count = self._execute(
                 t"""

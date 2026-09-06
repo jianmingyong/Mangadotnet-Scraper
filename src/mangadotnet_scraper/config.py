@@ -81,7 +81,7 @@ class MangaDotNetScraperConfig:
     @property
     def upload_verify_duration(self) -> int:
         value: int | None = self._data.get("upload_verify_duration")
-        return value if value is not None else 120
+        return value if value is not None else 60
 
     def load_config(self):
         try:

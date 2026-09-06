@@ -108,10 +108,14 @@ async def initialize_async() -> None:
                     if selection == 1:
                         async with MangaBakaApi() as mangabaka_api, MangaDotNetApi(config) as mangadotnet_api:
                             async with ArtLapsaModule(config) as module:
-                                await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
+                                await fetch_module_listing_details(
+                                    module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                                )
 
                             async with RitharScansModule(config) as module:
-                                await fetch_module_listing_details(module, config, data, mangabaka_api, mangadotnet_api)
+                                await fetch_module_listing_details(
+                                    module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                                )
                     elif selection == 2:
                         async with (
                             MangaBakaApi() as mangabaka_api,
@@ -247,6 +251,7 @@ async def fetch_module_listing_details(
     mangabaka_api: MangaBakaApi,
     mangadotnet_api: MangaDotNetApi,
     only_old_entries: bool = True,
+    map_only_null: bool = True,
     skip_mapping: bool = False,
 ) -> None:
     total_progress = Progress(
@@ -287,23 +292,46 @@ async def fetch_module_listing_details(
                         )
 
                     if not manual_override and not skip_mapping:
-                        mangabaka_entry = await mangabaka_api.get_entry_by_title([detail.title, *detail.alt_titles])
+                        if map_only_null:
+                            if mangabaka_id is None:
+                                mangabaka_entry = await mangabaka_api.get_entry_by_title(
+                                    [detail.title, *detail.alt_titles]
+                                )
 
-                        if (
-                            mangabaka_entry is not None
-                            and "id" in mangabaka_entry
-                            and isinstance(mangabaka_entry["id"], int)
-                        ):
-                            mangabaka_id = mangabaka_entry["id"]
+                                if (
+                                    mangabaka_entry is not None
+                                    and "id" in mangabaka_entry
+                                    and isinstance(mangabaka_entry["id"], int)
+                                ):
+                                    mangabaka_id = mangabaka_entry["id"]
 
-                        if mangabaka_id is not None:
-                            mangadotnet_id = await mangadotnet_api.get_id_by_mangabaka_id(mangabaka_id)
+                            if mangadotnet_id is None:
+                                if mangabaka_id is not None:
+                                    mangadotnet_id = await mangadotnet_api.get_id_by_mangabaka_id(mangabaka_id)
+                                else:
+                                    mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                        [detail.title, *detail.alt_titles]
+                                    )
+                                    if mangadotnet_entry is not None:
+                                        mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
                         else:
-                            mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                [detail.title, *detail.alt_titles]
-                            )
-                            if mangadotnet_entry is not None:
-                                mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
+                            mangabaka_entry = await mangabaka_api.get_entry_by_title([detail.title, *detail.alt_titles])
+
+                            if (
+                                mangabaka_entry is not None
+                                and "id" in mangabaka_entry
+                                and isinstance(mangabaka_entry["id"], int)
+                            ):
+                                mangabaka_id = mangabaka_entry["id"]
+
+                            if mangabaka_id is not None:
+                                mangadotnet_id = await mangadotnet_api.get_id_by_mangabaka_id(mangabaka_id)
+                            else:
+                                mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                    [detail.title, *detail.alt_titles]
+                                )
+                                if mangadotnet_entry is not None:
+                                    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
 
                     def is_chapter_uploaded(chapter: ModuleChapter, mangadotnet_chapters: list[Any]) -> bool:
                         for mangadotnet_chapter in mangadotnet_chapters:
