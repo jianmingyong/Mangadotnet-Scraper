@@ -242,7 +242,7 @@ class ArtLapsaModule(BaseModule):
         async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
             data = await response.read()
 
             return MangaImage(filename, data)
@@ -403,7 +403,7 @@ class RitharScansModule(BaseModule):
         async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
             data = await response.read()
 
             return MangaImage(filename, data)
@@ -575,7 +575,7 @@ class EzMangaModule(BaseModule):
         async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
             data = await response.read()
 
             return MangaImage(filename, data)
