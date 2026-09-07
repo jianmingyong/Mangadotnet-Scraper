@@ -1,7 +1,7 @@
 import sys
 
 from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, Error
+from playwright.async_api import Browser, Cookie, Error
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.camoufox_add_init_script.add_init_script import (
     get_addon_path,
@@ -67,7 +67,7 @@ async def get_cloudflare_cookies(url: str) -> tuple[str, str] | None:
 
                 await page.wait_for_load_state("domcontentloaded")
 
-            cookies = await context.cookies(url)
+            cookies: list[Cookie] = await context.cookies(url)
             cookie_value = None
 
             for cookie in cookies:

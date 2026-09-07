@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
 from asyncio import sleep
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from functools import wraps
+from typing import Final, ParamSpec, TypeVar
 
 from aiohttp import (
     AsyncResolver,
+    ClientConnectionError,
     ClientHandlerType,
     ClientRequest,
     ClientResponse,
@@ -16,7 +20,49 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 def create_client(limit=100, **kwargs) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, limit=limit)
-    return ClientSession(connector=connector, middlewares=[CloudflareMiddleware(), RetryAfterMiddleware()], **kwargs)
+    return ClientSession(
+        connector=connector, middlewares=[CloudflareMiddleware(), RetryableHandlerMiddleware()], **kwargs
+    )
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def session_retry[**P, T](
+    async_func: Callable[P, Coroutine[None, None, T]], max_retry: int = 5
+) -> Callable[P, Coroutine[None, None, T]]:
+    @wraps(async_func)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        for retry in range(max_retry):
+            try:
+                return await async_func(*args, **kwargs)
+            except ClientConnectionError:
+                # Connect failed or disconnect from internet.
+                await sleep(2 * (retry + 1))
+        return await async_func(*args, **kwargs)
+
+    return wrapper
+
+
+def session_retry_generator[**P, T](
+    async_func: Callable[P, AsyncGenerator[T]], max_retry: int = 5
+) -> Callable[P, AsyncGenerator[T]]:
+    @wraps(async_func)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[T]:
+        for retry in range(max_retry):
+            try:
+                async for item in async_func(*args, **kwargs):
+                    yield item
+                return
+            except ClientConnectionError:
+                # Connect failed or disconnect from internet.
+                await sleep(2 * (retry + 1))
+
+        async for item in async_func(*args, **kwargs):
+            yield item
+
+    return wrapper
 
 
 class Middleware(ABC):
@@ -25,39 +71,39 @@ class Middleware(ABC):
         raise NotImplementedError
 
 
-class RetryMiddleware(Middleware):
-    _max_retry_count: int
+class RetryableHandlerMiddleware(Middleware):
+    _REQUEST_TIMEOUT_STATUS_CODE = 408
+    _TOO_MANY_REQUEST_STATUS_CODE = 429
+    _GATEWAY_TIMEOUT_STATUS_CODE = 504
 
-    def __init__(self, max_retry_count: int = 5) -> None:
-        self._max_retry_count = max_retry_count
+    _RETRY_AFTER_HEADER = "Retry-After"
+
+    _max_retry: Final[int]
+
+    def __init__(self, max_retry: int = 5) -> None:
+        self._max_retry = max_retry
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         response: ClientResponse = (
             request.response if isinstance(request.response, ClientResponse) else await handler(request)
         )
-        retry_delay: int = 2
 
-        for _ in range(self._max_retry_count):
-            if response.ok:
-                return response
-            else:
-                await sleep(retry_delay)
-                retry_delay *= 2
+        for retry in range(self._max_retry):
+            if response.status == self._REQUEST_TIMEOUT_STATUS_CODE:
+                # Request timed out. Safe to try this again.
+                await sleep(2 * (retry + 1))
                 response = await handler(request)
-
-        return response
-
-
-class RetryAfterMiddleware(Middleware):
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        response: ClientResponse = (
-            request.response if isinstance(request.response, ClientResponse) else await handler(request)
-        )
-
-        if response.status == 429:
-            retry_timer = response.headers.get("Retry-After", "2")
-            await sleep(int(retry_timer))
-            response = await handler(request)
+            elif response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
+                # Rate limited. Try again after X seconds from _RETRY_AFTER_HEADER.
+                retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
+                await sleep(int(retry_timer) if retry_timer is not None else (2 * (retry + 1)))
+                response = await handler(request)
+            elif response.status == self._GATEWAY_TIMEOUT_STATUS_CODE:
+                # Gateway timed out. Safe to try this again.
+                await sleep(2 * (retry + 1))
+                response = await handler(request)
+            else:
+                break
 
         return response
 

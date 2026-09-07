@@ -5,15 +5,13 @@ from abc import abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from re import Match
 from typing import Any, Final, TypedDict
 
 from aiohttp import ClientSession
-from bs4 import BeautifulSoup, ResultSet, Tag
-from bs4.element import AttributeValueList
+from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.network import RetryMiddleware, create_client
+from mangadotnet_scraper.network import create_client, session_retry, session_retry_generator
 from mangadotnet_scraper.utilities import clean_string
 
 
@@ -28,14 +26,15 @@ class MangaDetail:
 class MangaChapter:
     language: str
     group: str
-    number: int | float
-    title: str
+    chapter_number: float
+    volume_number: float | None
+    chapter_title: str
     link: str
 
 
 @dataclass(frozen=True)
 class MangaPage:
-    number: int
+    page_number: int
     link: str
     data: dict[str, Any]
 
@@ -52,7 +51,7 @@ class BaseModule(AbstractAsyncContextManager):
     module_id: Final[str]
     display_name: Final[str]
 
-    def __init__(self, config: MangaDotNetScraperConfig, module_id: str, display_name: str) -> None:
+    def __init__(self, config: MangaDotNetScraperConfig, module_id: str, display_name: str):
         self._config = config
         self.module_id = module_id
         self.display_name = display_name
@@ -61,7 +60,7 @@ class BaseModule(AbstractAsyncContextManager):
         await self.initialize()
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         await self.close()
 
     async def initialize(self) -> None:
@@ -90,39 +89,43 @@ class BaseModule(AbstractAsyncContextManager):
 class ArtLapsaModule(BaseModule):
     _BASE_URL = "https://artlapsa.com"
 
-    _session: Final[ClientSession]
+    _session: ClientSession
 
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+    def __init__(self, config: MangaDotNetScraperConfig):
         super().__init__(config, "art_lapsa", "Art Lapsa")
-        self._session = create_client(base_url=self._BASE_URL)
+
+    async def initialize(self) -> None:
+        self._session = create_client(base_url=self._BASE_URL, headers={"Origin": self._BASE_URL})
 
     async def close(self) -> None:
         await self._session.close()
 
+    @session_retry_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
         async with self._session.get("/latest/") as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
-            elements: ResultSet[Tag] = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+            elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
 
             for element in elements:
                 yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
+    @session_retry
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         async with self._session.get(link) as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
             title_element = soup.find("h1")
-            title: str = clean_string(title_element.text) if title_element else ""
+            title = clean_string(title_element.text) if title_element else ""
 
-            alt_titles_element: ResultSet[Tag] = soup.find_all("span", attrs={"class": "select-all"})
-            alt_titles: list[str] = [clean_string(e.text) for e in alt_titles_element]
+            alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
+            alt_titles = [clean_string(e.text) for e in alt_titles_element]
 
             def is_chapter_link_element(tag: Tag) -> bool:
                 return (
@@ -132,15 +135,16 @@ class ArtLapsaModule(BaseModule):
                     and tag.find_parent("div", attrs={"id": "chapters"}) is not None
                 )
 
-            chapter_elements: ResultSet[Tag] = soup.find_all(is_chapter_link_element)
+            chapter_elements = soup.find_all(is_chapter_link_element)
             chapters: list[MangaChapter] = []
 
             for chapter_element in chapter_elements:
-                chapter_title: AttributeValueList | str | None = chapter_element.attrs.get("title")
+                chapter_title = chapter_element.attrs.get("title")
                 if not chapter_title or not isinstance(chapter_title, str):
                     continue
 
-                title_match: Match[str] | None = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+                title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+
                 if title_match:
                     chapter_number = float(title_match[1])
                 else:
@@ -153,6 +157,7 @@ class ArtLapsaModule(BaseModule):
                         "en",
                         self.display_name,
                         chapter_number,
+                        None,
                         f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
                         f"{self._BASE_URL}{chapter_link}",
                     )
@@ -160,11 +165,12 @@ class ArtLapsaModule(BaseModule):
 
             return MangaDetail(title, alt_titles, chapters)
 
-    async def fetch_manga_pages(self, manga_link: str, chapter_link: str):
+    @session_retry
+    async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         async with self._session.get(chapter_link) as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
             json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
@@ -172,7 +178,7 @@ class ArtLapsaModule(BaseModule):
             if json_element is None:
                 return []
 
-            json_str: str = str(json_element.attrs.get("x-data")).strip()
+            json_str = str(json_element.attrs.get("x-data")).strip()
             json_str = json_str[16:-1].replace("\\/", "/").replace("'", '"')
             json_str = re.sub(r"([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:", r'\1"\2":', json_str)
 
@@ -192,20 +198,27 @@ class ArtLapsaModule(BaseModule):
                     chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
                     page = 1
 
-                    while True:
-                        test_link = (
-                            f"{self._BASE_URL}/storage/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
-                        )
-                        async with self._session.get(
-                            test_link, middlewares=(*self._session._middlewares, RetryMiddleware(1))
-                        ) as test_response:
+                    @session_retry
+                    async def test_page_response(page_number: int, link: str):
+                        async with self._session.get(link) as test_response:
                             if test_response.ok:
                                 pages.append(
-                                    MangaPage(page, test_link, {"format": "jpg", "size": test_response.content_length})
+                                    MangaPage(
+                                        page_number, link, {"format": "jpg", "size": test_response.content_length}
+                                    )
                                 )
-                                page += 1
+                                return True
                             else:
-                                break
+                                return False
+
+                    while True:
+                        if await test_page_response(
+                            page,
+                            f"{self._BASE_URL}/storage/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg",
+                        ):
+                            page += 1
+                        else:
+                            break
                 else:
                     for i, page in zip(range(len(json_pages)), json_pages):
                         if isinstance(page, dict):
@@ -224,13 +237,12 @@ class ArtLapsaModule(BaseModule):
 
             return pages
 
+    @session_retry
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        async with self._session.get(
-            page.link, middlewares=(*self._session._middlewares, RetryMiddleware())
-        ) as response:
+        async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
             data = await response.read()
 
             return MangaImage(filename, data)
@@ -239,39 +251,43 @@ class ArtLapsaModule(BaseModule):
 class RitharScansModule(BaseModule):
     _BASE_URL = "https://ritharscans.com"
 
-    _session: Final[ClientSession]
+    _session: ClientSession
 
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+    def __init__(self, config: MangaDotNetScraperConfig):
         super().__init__(config, "rithar_scans", "Rithar Scans")
-        self._session = create_client(base_url=self._BASE_URL)
+
+    async def initialize(self) -> None:
+        self._session = create_client(base_url=self._BASE_URL, headers={"Origin": self._BASE_URL})
 
     async def close(self) -> None:
         await self._session.close()
 
+    @session_retry_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
         async with self._session.get("/latest") as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
-            elements: ResultSet[Tag] = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+            elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
 
             for element in elements:
                 yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
+    @session_retry
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         async with self._session.get(link) as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
             title_element = soup.find("h1")
-            title: str = clean_string(title_element.text) if title_element else ""
+            title = clean_string(title_element.text) if title_element else ""
 
-            alt_titles_element: ResultSet[Tag] = soup.find_all("span", attrs={"class": "select-all"})
-            alt_titles: list[str] = [clean_string(e.text) for e in alt_titles_element]
+            alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
+            alt_titles = [clean_string(e.text) for e in alt_titles_element]
 
             def is_chapter_link_element(tag: Tag) -> bool:
                 return (
@@ -281,15 +297,15 @@ class RitharScansModule(BaseModule):
                     and tag.find_parent("div", attrs={"id": "chapters"}) is not None
                 )
 
-            chapter_elements: ResultSet[Tag] = soup.find_all(is_chapter_link_element)
+            chapter_elements = soup.find_all(is_chapter_link_element)
             chapters: list[MangaChapter] = []
 
             for chapter_element in chapter_elements:
-                chapter_title: AttributeValueList | str | None = chapter_element.attrs.get("title")
+                chapter_title = chapter_element.attrs.get("title")
                 if not chapter_title or not isinstance(chapter_title, str):
                     continue
 
-                title_match: Match[str] | None = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+                title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
                 if title_match:
                     chapter_number = float(title_match[1])
                 else:
@@ -302,6 +318,7 @@ class RitharScansModule(BaseModule):
                         "en",
                         self.display_name,
                         chapter_number,
+                        None,
                         f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
                         f"{self._BASE_URL}{chapter_link}",
                     )
@@ -309,11 +326,12 @@ class RitharScansModule(BaseModule):
 
             return MangaDetail(title, alt_titles, chapters)
 
-    async def fetch_manga_pages(self, manga_link: str, chapter_link: str):
+    @session_retry
+    async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         async with self._session.get(chapter_link) as response:
             response.raise_for_status()
 
-            html: str = await response.text("utf-8")
+            html = await response.text("utf-8")
             soup = BeautifulSoup(html, "html.parser")
 
             json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
@@ -321,7 +339,7 @@ class RitharScansModule(BaseModule):
             if json_element is None:
                 return []
 
-            json_str: str = str(json_element.attrs.get("x-data")).strip()
+            json_str = str(json_element.attrs.get("x-data")).strip()
             json_str = json_str[16:-1].replace("\\/", "/").replace("'", '"')
             json_str = re.sub(r"([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:", r'\1"\2":', json_str)
 
@@ -341,20 +359,27 @@ class RitharScansModule(BaseModule):
                     chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
                     page = 1
 
-                    while True:
-                        test_link = (
-                            f"{self._BASE_URL}/storage/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
-                        )
-                        async with self._session.get(
-                            test_link, middlewares=(*self._session._middlewares, RetryMiddleware(1))
-                        ) as test_response:
+                    @session_retry
+                    async def test_page_response(page_number: int, link: str):
+                        async with self._session.get(link) as test_response:
                             if test_response.ok:
                                 pages.append(
-                                    MangaPage(page, test_link, {"format": "jpg", "size": test_response.content_length})
+                                    MangaPage(
+                                        page_number, link, {"format": "jpg", "size": test_response.content_length}
+                                    )
                                 )
-                                page += 1
+                                return True
                             else:
-                                break
+                                return False
+
+                    while True:
+                        if await test_page_response(
+                            page,
+                            f"{self._BASE_URL}/storage/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg",
+                        ):
+                            page += 1
+                        else:
+                            break
                 else:
                     for i, page in zip(range(len(json_pages)), json_pages):
                         if isinstance(page, dict):
@@ -373,13 +398,12 @@ class RitharScansModule(BaseModule):
 
             return pages
 
+    @session_retry
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        async with self._session.get(
-            page.link, middlewares=(*self._session._middlewares, RetryMiddleware())
-        ) as response:
+        async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
             data = await response.read()
 
             return MangaImage(filename, data)
@@ -389,10 +413,12 @@ class EzMangaModule(BaseModule):
     _BASE_URL = "https://ezmanga.org"
     _BASE_API_URL = "https://vapi.ezmanga.org"
 
-    _session: Final[ClientSession]
+    _session: ClientSession
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(config, "ez_manga", "Ezmanga")
+
+    async def initialize(self) -> None:
         self._session = create_client(
             base_url=self._BASE_URL,
             headers={
@@ -419,30 +445,35 @@ class EzMangaModule(BaseModule):
         type: str
 
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
-        async with self._session.get(
-            f"{self._BASE_API_URL}/api/v1/series", params={"page": 1, "perPage": 100, "sort": "newest"}
-        ) as response:
-            response.raise_for_status()
+        @session_retry
+        async def fetch_listing_pages() -> int:
+            async with self._session.get(
+                f"{self._BASE_API_URL}/api/v1/series", params={"page": 1, "perPage": 100, "sort": "newest"}
+            ) as response:
+                response.raise_for_status()
 
-            json: self.MangaListingResponse = await response.json()
+                json: self.MangaListingResponse = await response.json()
+                return json["totalPages"]
 
-            pages = json["totalPages"]
+        page = 1
+        total_page = await fetch_listing_pages()
 
-            for data in json["data"]:
-                if data["type"] != "NOVEL" and data["slug"] != "":
-                    yield data["title"], f"{self._BASE_URL}/series/{data['slug']}"
+        @session_retry_generator
+        async def fetch_listing(page: int):
+            async with self._session.get(
+                f"{self._BASE_API_URL}/api/v1/series", params={"page": page, "perPage": 100, "sort": "newest"}
+            ) as response:
+                response.raise_for_status()
 
-            for page in range(2, pages + 1):
-                async with self._session.get(
-                    f"{self._BASE_API_URL}/api/v1/series", params={"page": page, "perPage": 100, "sort": "newest"}
-                ) as response:
-                    response.raise_for_status()
+                json: self.MangaListingResponse = await response.json()
 
-                    json: self.MangaListingResponse = await response.json()
+                for data in json["data"]:
+                    if data["type"] != "NOVEL" and data["slug"] != "":
+                        yield clean_string(data["title"]), clean_string(f"{self._BASE_URL}/series/{data['slug']}")
 
-                    for data in json["data"]:
-                        if data["type"] != "NOVEL" and data["slug"] != "":
-                            yield clean_string(data["title"]), f"{self._BASE_URL}/series/{data['slug']}"
+        for i in range(total_page):
+            async for title, link in fetch_listing(page + i):
+                yield title, link
 
     class MangaDetailResponse(TypedDict):
         title: str
@@ -463,63 +494,51 @@ class EzMangaModule(BaseModule):
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         slug_id = link[link.rindex("/") + 1 :]
 
-        async with self._session.get(f"{self._BASE_API_URL}/api/v1/series/{slug_id}") as response:
-            response.raise_for_status()
+        @session_retry
+        async def get_titles():
+            async with self._session.get(f"{self._BASE_API_URL}/api/v1/series/{slug_id}") as response:
+                response.raise_for_status()
+                json: self.MangaDetailResponse = await response.json()
+                return clean_string(json["title"]), clean_string(json["alternativeTitles"])
 
-            json: self.MangaDetailResponse = await response.json()
+        title, alt_titles = await get_titles()
+        chapters: list[MangaChapter] = []
 
-            title = clean_string(json["title"])
-            alt_titles = clean_string(json["alternativeTitles"])
-
-            chapters: list[MangaChapter] = []
-
+        async def get_chapters(cursor: str | None):
             async with self._session.get(
-                f"{self._BASE_API_URL}/api/v2/series/{slug_id}/chapters", params={"limit": 100, "sort": "asc"}
-            ) as chapter_response:
-                chapter_response.raise_for_status()
+                f"{self._BASE_API_URL}/api/v2/series/{slug_id}/chapters",
+                params={"limit": 100, "sort": "asc"}
+                if cursor is None
+                else {"limit": 100, "sort": "asc", "cursor": cursor},
+            ) as response:
+                response.raise_for_status()
+                json: self.MangaChapterResponse = await response.json()
 
-                chapter_json: self.MangaChapterResponse = await chapter_response.json()
-
-                for data in chapter_json["data"]:
+                for data in json["data"]:
                     if data["isFree"]:
+                        inner_title = clean_string(data["title"]) if data["title"] is not None else None
                         chapters.append(
                             MangaChapter(
                                 "en",
                                 self.display_name,
                                 data["number"],
-                                clean_string(data["title"])
-                                if data["title"] is not None and clean_string(data["title"]) != "" and clean_string(data["title"]) != str(data["number"])
+                                None,
+                                inner_title
+                                if inner_title is not None and inner_title != "" and inner_title != str(data["number"])
                                 else f"Chapter {data['number']}",
                                 f"{self._BASE_URL}/series/{slug_id}/{data['slug']}",
                             )
                         )
 
-                while chapter_json["hasMore"] and chapter_json["nextCursor"] is not None:
-                    async with self._session.get(
-                        f"{self._BASE_API_URL}/api/v2/series/{slug_id}/chapters",
-                        params={"limit": 100, "sort": "asc", "cursor": chapter_json["nextCursor"]},
-                    ) as chapter_response:
-                        chapter_response.raise_for_status()
+                return json["hasMore"], json["nextCursor"]
 
-                        chapter_json: self.MangaChapterResponse = await chapter_response.json()
+        has_more = True
+        cursor = None
 
-                        for data in chapter_json["data"]:
-                            if data["isFree"]:
-                                chapters.append(
-                                    MangaChapter(
-                                        "en",
-                                        self.display_name,
-                                        data["number"],
-                                        clean_string(data["title"])
-                                        if data["title"] is not None
-                                        and clean_string(data["title"]) != ""
-                                        and clean_string(data["title"]) != str(data["number"])
-                                        else f"Chapter {data['number']}",
-                                        f"{self._BASE_URL}/series/{slug_id}/{data['slug']}",
-                                    )
-                                )
+        while has_more:
+            has_more, cursor = await get_chapters(cursor)
 
-            return MangaDetail(title, [alt_titles], chapters)
+        return MangaDetail(title, [alt_titles], chapters)
 
     class MangaPageResponse(TypedDict):
         images: list[EzMangaModule.MangaPageResponseImage]
@@ -530,6 +549,7 @@ class EzMangaModule(BaseModule):
         width: int
         height: int
 
+    @session_retry
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         manga_slug = manga_link[manga_link.rfind("/") + 1 :]
         chapter_slug = chapter_link[chapter_link.rfind("/") + 1 :]
@@ -550,13 +570,12 @@ class EzMangaModule(BaseModule):
 
         return manga_pages
 
+    @session_retry
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        async with self._session.get(
-            page.link, middlewares=(*self._session._middlewares, RetryMiddleware())
-        ) as response:
+        async with self._session.get(page.link) as response:
             response.raise_for_status()
 
-            filename = f"{page.number:03d}{mimetypes.guess_extension(response.content_type)}"
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type)}"
             data = await response.read()
 
             return MangaImage(filename, data)
