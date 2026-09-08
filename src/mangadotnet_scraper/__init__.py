@@ -91,7 +91,7 @@ async def initialize_async() -> None:
                         for module in modules:
                             async with module:
                                 await fetch_module_listing(module, data)
-                    elif selection < len(modules):
+                    elif 0 <= selection < len(modules):
                         async with modules[selection] as module:
                             await fetch_module_listing(module, data)
                     else:
@@ -113,7 +113,7 @@ async def initialize_async() -> None:
                                     await fetch_module_listing_details(
                                         module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
                                     )
-                    elif selection < len(modules):
+                    elif 0 <= selection < len(modules):
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
@@ -147,7 +147,7 @@ async def initialize_async() -> None:
                                         only_old_entries=False,
                                         skip_mapping=True,
                                     )
-                    elif selection < len(modules):
+                    elif 0 <= selection < len(modules):
                         async with (
                             MangaBakaApi() as mangabaka_api,
                             MangaDotNetApi(config) as mangadotnet_api,
@@ -179,7 +179,7 @@ async def initialize_async() -> None:
                             for module in modules:
                                 async with module:
                                     await upload_chapters(module, config, data, mangadotnet_api)
-                    elif selection < len(modules):
+                    elif 0 <= selection < len(modules):
                         async with MangaDotNetApi(config) as mangadotnet_api, modules[selection] as module:
                             await upload_chapters(module, config, data, mangadotnet_api)
                     else:
@@ -401,7 +401,7 @@ async def upload_chapters(
                         "",
                         start=False,
                         total=None,
-                        chapter=f"{language}:{chapter_number}:{scanlator_group}",
+                        chapter=f"{mangadotnet_id}:{language}:{chapter_number} [{scanlator_group}]",
                         status="Fetching Manga Pages...",
                     )
 
@@ -477,12 +477,9 @@ async def upload_chapters(
                             current_progress.update(task_id, completed=current, status="Uploading")
 
                         current_progress.start_task(task_id)
+                        current_progress.update(task_id, status="Uploading")
 
                         success = await mangadotnet_api.upload_file(location, zip_buffer, callable_progress)
-
-                        logging.getLogger().info(
-                            f"Chapter Uploaded: [{mangadotnet_id}] {language}:{chapter_number} {chapter_title} [{group_id}]"
-                        )
 
                         current_progress.stop_task(task_id)
                         current_progress.update(task_id, total=None, status="Verify Upload (0s)")
@@ -530,8 +527,17 @@ async def upload_chapters(
 
                         if found:
                             data.mark_chapter_uploaded(manga_rowid, language, scanlator_group, chapter_number)
+                            logging.getLogger().info(
+                                f"Upload Success: [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                            )
+                        else:
+                            logging.getLogger().info(
+                                f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                            )
                     except ClientError:
-                        pass
+                        logging.getLogger().info(
+                            f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                        )
                     finally:
                         current_progress.remove_task(task_id)
 
