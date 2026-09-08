@@ -49,7 +49,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
     @retryable_client_session
     async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData | MangaBakaError:
-        async with self._session.get(f"/v1/series/{ids}") as response:
+        async with self._session.get(f"/v2/series/{ids}") as response:
             json: MangaBakaEntry | MangaBakaError = await response.json(encoding="utf-8")
             return json if json["status"] != 200 else json["data"]
 
@@ -61,7 +61,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
         for title in titles:
             async with await self._session.get(
-                "/v1/series/match",
+                "/v2/series/match",
                 params={
                     "q": title,
                     "type_not": "novel",
@@ -77,7 +77,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
         if len(matches) == 0:
             for title in titles:
                 async with self._session.get(
-                    "/v1/series/search",
+                    "/v2/series/search",
                     params={
                         "q": title,
                         "type_not": "novel",
