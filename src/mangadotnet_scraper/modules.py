@@ -11,7 +11,7 @@ from aiohttp import ClientSession
 from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.network import create_client, session_retry, session_retry_generator
+from mangadotnet_scraper.network import create_client, retryable_client_session, retryable_client_session_generator
 from mangadotnet_scraper.utilities import clean_string
 
 
@@ -100,7 +100,7 @@ class ArtLapsaModule(BaseModule):
     async def close(self) -> None:
         await self._session.close()
 
-    @session_retry_generator
+    @retryable_client_session_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
         async with self._session.get("/latest/") as response:
             response.raise_for_status()
@@ -113,7 +113,7 @@ class ArtLapsaModule(BaseModule):
             for element in elements:
                 yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         async with self._session.get(link) as response:
             response.raise_for_status()
@@ -165,7 +165,7 @@ class ArtLapsaModule(BaseModule):
 
             return MangaDetail(title, alt_titles, chapters)
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         async with self._session.get(chapter_link) as response:
             response.raise_for_status()
@@ -198,7 +198,7 @@ class ArtLapsaModule(BaseModule):
                     chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
                     page = 1
 
-                    @session_retry
+                    @retryable_client_session
                     async def test_page_response(page_number: int, link: str):
                         async with self._session.get(link) as test_response:
                             if test_response.ok:
@@ -237,7 +237,7 @@ class ArtLapsaModule(BaseModule):
 
             return pages
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
         async with self._session.get(page.link) as response:
             response.raise_for_status()
@@ -262,7 +262,7 @@ class RitharScansModule(BaseModule):
     async def close(self) -> None:
         await self._session.close()
 
-    @session_retry_generator
+    @retryable_client_session_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
         async with self._session.get("/latest") as response:
             response.raise_for_status()
@@ -275,7 +275,7 @@ class RitharScansModule(BaseModule):
             for element in elements:
                 yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         async with self._session.get(link) as response:
             response.raise_for_status()
@@ -326,7 +326,7 @@ class RitharScansModule(BaseModule):
 
             return MangaDetail(title, alt_titles, chapters)
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         async with self._session.get(chapter_link) as response:
             response.raise_for_status()
@@ -359,7 +359,7 @@ class RitharScansModule(BaseModule):
                     chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
                     page = 1
 
-                    @session_retry
+                    @retryable_client_session
                     async def test_page_response(page_number: int, link: str):
                         async with self._session.get(link) as test_response:
                             if test_response.ok:
@@ -398,7 +398,7 @@ class RitharScansModule(BaseModule):
 
             return pages
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
         async with self._session.get(page.link) as response:
             response.raise_for_status()
@@ -445,7 +445,7 @@ class EzMangaModule(BaseModule):
         type: str
 
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
-        @session_retry
+        @retryable_client_session
         async def fetch_listing_pages() -> int:
             async with self._session.get(
                 f"{self._BASE_API_URL}/api/v1/series", params={"page": 1, "perPage": 100, "sort": "newest"}
@@ -458,7 +458,7 @@ class EzMangaModule(BaseModule):
         page = 1
         total_page = await fetch_listing_pages()
 
-        @session_retry_generator
+        @retryable_client_session_generator
         async def fetch_listing(page: int):
             async with self._session.get(
                 f"{self._BASE_API_URL}/api/v1/series", params={"page": page, "perPage": 100, "sort": "newest"}
@@ -494,7 +494,7 @@ class EzMangaModule(BaseModule):
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
         slug_id = link[link.rindex("/") + 1 :]
 
-        @session_retry
+        @retryable_client_session
         async def get_titles():
             async with self._session.get(f"{self._BASE_API_URL}/api/v1/series/{slug_id}") as response:
                 response.raise_for_status()
@@ -549,7 +549,7 @@ class EzMangaModule(BaseModule):
         width: int
         height: int
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
         manga_slug = manga_link[manga_link.rfind("/") + 1 :]
         chapter_slug = chapter_link[chapter_link.rfind("/") + 1 :]
@@ -570,7 +570,7 @@ class EzMangaModule(BaseModule):
 
         return manga_pages
 
-    @session_retry
+    @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
         async with self._session.get(page.link) as response:
             response.raise_for_status()

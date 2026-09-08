@@ -8,7 +8,7 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import questionary
-from aiohttp import ClientConnectionError, ClientResponseError
+from aiohttp import ClientResponseError
 from aiohttp.client_exceptions import ClientError
 from questionary import Choice
 from rich import get_console

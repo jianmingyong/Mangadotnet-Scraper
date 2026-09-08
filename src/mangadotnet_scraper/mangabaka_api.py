@@ -1,74 +1,65 @@
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal, ReadOnly, TypedDict
 
 from aiohttp import ClientSession
-from asynciolimiter import LeakyBucketLimiter
 
-from mangadotnet_scraper.network import create_client
+from mangadotnet_scraper.network import create_client, retryable_client_session
 
 
 class MangaBakaError(TypedDict):
-    status: Literal[400, 404, 429, 500, 503, 504]
-    message: str
+    status: ReadOnly[Literal[400, 404, 429, 500, 503, 504]]
+    message: ReadOnly[str]
 
 
 class MangaBakaEntry(TypedDict):
-    status: Literal[200]
-    data: MangaBakaEntryData
+    status: ReadOnly[Literal[200]]
+    data: ReadOnly[MangaBakaEntryData]
 
 
 class MangaBakaEntries(TypedDict):
-    status: Literal[200]
-    data: list[MangaBakaEntryData]
+    status: ReadOnly[Literal[200]]
+    data: Sequence[MangaBakaEntryData]
 
 
 class MangaBakaEntryData(TypedDict):
-    id: int
-    titles: list[MangaBakaEntryDataTitle]
+    id: ReadOnly[int]
+    titles: Sequence[MangaBakaEntryDataTitle]
 
 
 class MangaBakaEntryDataTitle(TypedDict):
-    title: str
+    title: ReadOnly[str]
 
 
 class MangaBakaApi(AbstractAsyncContextManager):
     _BASE_API_URL = "https://api.mangabaka.org"
 
-    _default_limiter: Final[LeakyBucketLimiter]
-    _search_limiter: Final[LeakyBucketLimiter]
     _session: Final[ClientSession]
 
     def __init__(self):
-        self._default_limiter = LeakyBucketLimiter(180 / 60, capacity=135)
-        self._search_limiter = LeakyBucketLimiter(30 / 60, capacity=23)
-        self._session = create_client(base_url=f"{self._BASE_API_URL}")
+        self._session = create_client(base_url=f"{self._BASE_API_URL}", headers={"Origin": self._BASE_API_URL})
 
     async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         await self.close()
 
     async def close(self):
-        self._default_limiter.close()
-        self._search_limiter.close()
-
         if self._session is not None:
             await self._session.close()
 
+    @retryable_client_session
     async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData | MangaBakaError:
-        await self._default_limiter.wait()
         async with self._session.get(f"/v1/series/{ids}") as response:
             json: MangaBakaEntry | MangaBakaError = await response.json(encoding="utf-8")
             return json if json["status"] != 200 else json["data"]
 
-    async def get_entry_by_title(self, titles: str | list[str]) -> MangaBakaEntryData | None | MangaBakaError:
+    async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaBakaEntryData | None | MangaBakaError:
         if isinstance(titles, str):
             titles = [titles]
 
         matches: list[MangaBakaEntryData] = []
 
         for title in titles:
-            await self._default_limiter.wait()
-
             async with await self._session.get(
                 "/v1/series/match",
                 params={
@@ -85,8 +76,6 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
         if len(matches) == 0:
             for title in titles:
-                await self._search_limiter.wait()
-
                 async with self._session.get(
                     "/v1/series/search",
                     params={

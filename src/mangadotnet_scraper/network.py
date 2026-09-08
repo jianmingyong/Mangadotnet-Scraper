@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from asyncio import sleep
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from functools import wraps
-from typing import Final, ParamSpec, TypeVar
+from typing import Final, cast
 
 from aiohttp import (
     AsyncResolver,
@@ -25,15 +25,11 @@ def create_client(limit=100, **kwargs) -> ClientSession:
     )
 
 
-P = ParamSpec("P")
-T = TypeVar("T")
-
-
-def session_retry[**P, T](
-    async_func: Callable[P, Coroutine[None, None, T]], max_retry: int = 5
-) -> Callable[P, Coroutine[None, None, T]]:
+def retryable_client_session[**P, R](
+    async_func: Callable[P, Coroutine[None, None, R]], max_retry: int = 5
+) -> Callable[P, Coroutine[None, None, R]]:
     @wraps(async_func)
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         for retry in range(max_retry):
             try:
                 return await async_func(*args, **kwargs)
@@ -45,11 +41,11 @@ def session_retry[**P, T](
     return wrapper
 
 
-def session_retry_generator[**P, T](
-    async_func: Callable[P, AsyncGenerator[T]], max_retry: int = 5
-) -> Callable[P, AsyncGenerator[T]]:
+def retryable_client_session_generator[**P, R](
+    async_func: Callable[P, AsyncGenerator[R]], max_retry: int = 5
+) -> Callable[P, AsyncGenerator[R]]:
     @wraps(async_func)
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[T]:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[R]:
         for retry in range(max_retry):
             try:
                 async for item in async_func(*args, **kwargs):
@@ -85,7 +81,7 @@ class RetryableHandlerMiddleware(Middleware):
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         response: ClientResponse = (
-            request.response if isinstance(request.response, ClientResponse) else await handler(request)
+            cast(ClientResponse, request.response) if request.response is not None else await handler(request)
         )
 
         for retry in range(self._max_retry):
@@ -123,19 +119,19 @@ class CloudflareMiddleware(Middleware):
             if self._user_agent is not None:
                 request.headers.update({"User-Agent": self._user_agent})
 
-            cookie: str | None = self._cookies.get(request.host)
+            cookie = self._cookies.get(request.host)
 
             if cookie is not None:
                 request.update_cookies({self._CLOUDFLARE_COOKIE_NAME: cookie})
 
             return await handler(request)
 
-        response: ClientResponse = (
-            request.response if isinstance(request.response, ClientResponse) else await update_and_request()
+        response = (
+            cast(ClientResponse, request.response) if request.response is not None else await update_and_request()
         )
 
         if response.headers.get("cf-mitigated") == "challenge":
-            data: tuple[str, str] | None = await get_cloudflare_cookies(str(request.url))
+            data = await get_cloudflare_cookies(str(request.url))
 
             if data is not None:
                 self._user_agent = data[0]

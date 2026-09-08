@@ -23,12 +23,9 @@ class MangaDotNetScraperConfig:
         "mangadotnet_username": "",
         "mangadotnet_password": "",
         "mangadotnet_user_session": None,
-
         "fetch_concurrency": 12,
-
         "download_concurrency": 12,
         "download_max_retry": 5,
-
         "upload_concurrency": 10,
         "upload_chunk_size": 4 * 1024 * 1024,
         "upload_verify_duration": 60,
