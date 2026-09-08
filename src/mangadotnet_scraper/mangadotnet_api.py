@@ -188,7 +188,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     submit_button = page.get_by_text("Log in", exact=True).first
 
                     while not page.is_closed() and await submit_button.is_disabled():
-                        await asyncio.sleep(1)
+                        await sleep(1)
 
                     await submit_button.click()
 
