@@ -17,11 +17,11 @@ from aiohttp import (
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 
 
-def create_client(limit=100, **kwargs) -> ClientSession:
+def create_client(base_url: str | None = None, **kwargs) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
-    connector = TCPConnector(resolver=resolver, limit=limit)
+    connector = TCPConnector(resolver=resolver)
     return ClientSession(
-        connector=connector, middlewares=[CloudflareMiddleware(), RetryableHandlerMiddleware()], **kwargs
+        base_url, connector=connector, middlewares=[CloudflareMiddleware(), RetryableHandlerMiddleware()], **kwargs
     )
 
 

@@ -1,8 +1,9 @@
-import sqlite3
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from sqlite3 import Cursor
+from sqlite3 import Connection, Cursor
+from sqlite3 import connect as sqlite3_connect
 from string.templatelib import Interpolation, Template
+from types import TracebackType
 from typing import Final
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
@@ -30,14 +31,20 @@ class ModuleChapter:
 
 class MangaDotNetScraperData(AbstractContextManager):
     _config: Final[MangaDotNetScraperConfig]
-    _connection: Final[sqlite3.Connection]
+    _connection: Final[Connection]
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         self._config = config
-        self._connection = sqlite3.connect("data.db", autocommit=False)
+        self._connection = sqlite3_connect(config.data_file, autocommit=False)
         self.initialize()
 
-    def __exit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+        /,
+    ) -> None:
         self.close()
 
     def initialize(self) -> None:
@@ -140,8 +147,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 connection.execute("INSERT INTO db_version(table_name, version) VALUES (?, ?);", ("module_manga", 2))
 
     def close(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
+        self._connection.close()
 
     def _execute(self, sql: Template) -> Cursor:
         query = ""
@@ -282,7 +288,9 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-    def mark_chapter_uploaded(self, manga_rowid: int, language: str, scanlator_group: str, chapter_number: float) -> None:
+    def mark_chapter_uploaded(
+        self, manga_rowid: int, language: str, scanlator_group: str, chapter_number: float
+    ) -> None:
         with self._connection:
             self._execute(
                 t"""

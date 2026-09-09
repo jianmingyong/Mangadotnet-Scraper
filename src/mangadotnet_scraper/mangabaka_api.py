@@ -1,6 +1,7 @@
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
+from types import TracebackType
 from typing import Final, Literal, ReadOnly, TypedDict
 
 from aiohttp import ClientSession
@@ -37,15 +38,20 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
     _session: Final[ClientSession]
 
-    def __init__(self):
-        self._session = create_client(base_url=f"{self._BASE_API_URL}", headers={"Origin": self._BASE_API_URL})
+    def __init__(self) -> None:
+        self._session = create_client(f"{self._BASE_API_URL}", headers={"Origin": self._BASE_API_URL})
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+        /,
+    ) -> None:
         await self.close()
 
-    async def close(self):
-        if self._session is not None:
-            await self._session.close()
+    async def close(self) -> None:
+        await self._session.close()
 
     @retryable_client_session
     async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData | MangaBakaError:
@@ -53,14 +59,15 @@ class MangaBakaApi(AbstractAsyncContextManager):
             json: MangaBakaEntry | MangaBakaError = await response.json(encoding="utf-8")
             return json if json["status"] != 200 else json["data"]
 
-    async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaBakaEntryData | None | MangaBakaError:
+    async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaBakaEntryData | None:
         if isinstance(titles, str):
             titles = [titles]
 
         matches: list[MangaBakaEntryData] = []
 
-        for title in titles:
-            async with await self._session.get(
+        @retryable_client_session
+        async def do_exact_match(title: str) -> None:
+            async with self._session.get(
                 "/v2/series/match",
                 params={
                     "q": title,
@@ -70,25 +77,32 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 json: MangaBakaEntries | MangaBakaError = await response.json(encoding="utf-8")
 
                 if json["status"] != 200:
-                    return json
+                    return
+
+                matches.extend(json["data"])
+
+        for title in titles:
+            await do_exact_match(title)
+
+        @retryable_client_session
+        async def do_search(title: str) -> None:
+            async with self._session.get(
+                "/v2/series/search",
+                params={
+                    "q": title,
+                    "type_not": "novel",
+                },
+            ) as response:
+                json: MangaBakaEntries | MangaBakaError = await response.json(encoding="utf-8")
+
+                if json["status"] != 200:
+                    return
 
                 matches.extend(json["data"])
 
         if len(matches) == 0:
             for title in titles:
-                async with self._session.get(
-                    "/v2/series/search",
-                    params={
-                        "q": title,
-                        "type_not": "novel",
-                    },
-                ) as response:
-                    json: MangaBakaEntries | MangaBakaError = await response.json(encoding="utf-8")
-
-                    if json["status"] != 200:
-                        return json
-
-                    matches.extend(json["data"])
+                await do_search(title)
 
         if len(matches) == 0:
             return None

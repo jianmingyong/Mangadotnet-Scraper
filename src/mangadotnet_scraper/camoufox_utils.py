@@ -15,7 +15,7 @@ from playwright_captcha.utils.exceptions import (
 )
 
 
-def create_browser(headless=True, **launch_options):
+def create_browser(headless: bool = True, **launch_options):
     os = sys.platform
 
     if os == "win32" or os == "cygwin":
@@ -41,10 +41,9 @@ def create_browser(headless=True, **launch_options):
 
 async def get_cloudflare_cookies(url: str) -> tuple[str, str] | None:
     try:
-        async with create_browser() as browser:
-            context = await cast(Browser, browser).new_context()
+        async with create_browser() as browser, await cast(Browser, browser).new_context() as context:
             page = await context.new_page()
-
+            
             async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
                 await page.goto(url, wait_until="domcontentloaded")
                 user_agent: str = await page.evaluate("navigator.userAgent")

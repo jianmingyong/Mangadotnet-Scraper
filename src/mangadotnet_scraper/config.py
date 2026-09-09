@@ -4,6 +4,8 @@ from typing import Final, TypedDict
 
 class MangaDotNetScraperConfig:
     class Data(TypedDict):
+        data_file: str | None
+
         mangadotnet_username: str | None
         mangadotnet_password: str | None
         mangadotnet_user_session: str | None
@@ -20,6 +22,7 @@ class MangaDotNetScraperConfig:
     _CONFIG_FILE_PATH: Final[str] = "./config.json"
 
     _DEFAULT_CONFIG: Final[Data] = {
+        "data_file": "data.db",
         "mangadotnet_username": "",
         "mangadotnet_password": "",
         "mangadotnet_user_session": None,
@@ -33,6 +36,13 @@ class MangaDotNetScraperConfig:
 
     def __init__(self):
         self._data: MangaDotNetScraperConfig.Data = self._DEFAULT_CONFIG
+
+    def _return_or_default[T](self, value: T | None, default: T) -> T:
+        return value if value is not None else default
+
+    @property
+    def data_file(self) -> str:
+        return self._return_or_default(self._data.get("data_file"), "data.db")
 
     @property
     def mangadotnet_username(self) -> str | None:
@@ -52,33 +62,27 @@ class MangaDotNetScraperConfig:
 
     @property
     def fetch_concurrency(self) -> int:
-        value: int | None = self._data.get("fetch_concurrency")
-        return value if value is not None else 12
+        return self._return_or_default(self._data.get("fetch_concurrency"), 12)
 
     @property
     def download_concurrency(self) -> int:
-        value: int | None = self._data.get("download_concurrency")
-        return value if value is not None else 12
+        return self._return_or_default(self._data.get("download_concurrency"), 12)
 
     @property
     def download_max_retry(self) -> int:
-        value: int | None = self._data.get("download_max_retry")
-        return value if value is not None else 5
+        return self._return_or_default(self._data.get("download_max_retry"), 5)
 
     @property
     def upload_concurrency(self) -> int:
-        value: int | None = self._data.get("upload_concurrency")
-        return value if value is not None else 10
+        return self._return_or_default(self._data.get("upload_concurrency"), 10)
 
     @property
     def upload_chunk_size(self) -> int:
-        value: int | None = self._data.get("upload_chunk_size")
-        return value if value is not None else 4 * 1024 * 1024
+        return self._return_or_default(self._data.get("upload_chunk_size"), 4 * 1024 * 1024)
 
     @property
     def upload_verify_duration(self) -> int:
-        value: int | None = self._data.get("upload_verify_duration")
-        return value if value is not None else 60
+        return self._return_or_default(self._data.get("upload_verify_duration"), 60)
 
     def load_config(self):
         try:

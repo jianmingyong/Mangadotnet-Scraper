@@ -273,7 +273,13 @@ async def fetch_module_listing_details(
 
                             if mangadotnet_id is None:
                                 if mangabaka_id is not None:
-                                    mangadotnet_id = await mangadotnet_api.get_id_by_mangabaka_id(mangabaka_id)
+                                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
+
+                                    if mangadotnet_id is None:
+                                        response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
+                                        mangadotnet_id = (
+                                            response["manga"]["id"] if response["success"] == True else None
+                                        )
                                 else:
                                     mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
                                         [detail.title, *detail.alt_titles]
@@ -291,7 +297,11 @@ async def fetch_module_listing_details(
                                 mangabaka_id = mangabaka_entry["id"]
 
                             if mangabaka_id is not None:
-                                mangadotnet_id = await mangadotnet_api.get_id_by_mangabaka_id(mangabaka_id)
+                                mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
+
+                                if mangadotnet_id is None:
+                                    response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
+                                    mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
                             else:
                                 mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
                                     [detail.title, *detail.alt_titles]
@@ -499,7 +509,7 @@ async def upload_chapters(
                                         uploaded_manga["manga_id"] == mangadotnet_id
                                         and uploaded_manga["language"] == language
                                         and uploaded_manga["chapter_number"] is not None
-                                        and abs(float(uploaded_manga["chapter_number"]) - chapter_number) < 0.1
+                                        and abs(uploaded_manga["chapter_number"] - chapter_number) < 0.1
                                         and any(
                                             uploaded_group["id"] == group_id
                                             for uploaded_group in uploaded_manga["groups"]
