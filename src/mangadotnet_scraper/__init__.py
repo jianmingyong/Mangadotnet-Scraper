@@ -378,7 +378,7 @@ async def upload_chapters(
     with Live(Group(total_progress, Rule(), current_progress_title, current_progress), transient=True):
         manga_count, manga = data.get_non_uploaded_manga(module.module_id)
         total_progress_task = total_progress.add_task(module.display_name, total=manga_count)
-        current_progress_title_task = current_progress_title.add_task("", status="")
+        current_progress_title_task = current_progress_title.add_task("", status="", count=0)
 
         for rowid, link, title, mangadotnet_id in manga:
             current_progress_title.update(current_progress_title_task, status=f"Uploading: {title}", count=0)
