@@ -57,7 +57,7 @@ class MangaDotNetScraperConfig:
         return self._data.get("mangadotnet_user_session")
 
     @mangadotnet_user_session.setter
-    def mangadotnet_user_session(self, value: str) -> None:
+    def mangadotnet_user_session(self, value: str | None) -> None:
         self._data["mangadotnet_user_session"] = value
 
     @property

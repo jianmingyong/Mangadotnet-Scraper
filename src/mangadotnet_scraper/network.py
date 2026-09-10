@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
 from asyncio import sleep
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from functools import wraps
 from typing import Final, cast
 
@@ -8,20 +7,31 @@ from aiohttp import (
     AsyncResolver,
     ClientConnectionError,
     ClientHandlerType,
+    ClientMiddlewareType,
     ClientRequest,
     ClientResponse,
     ClientSession,
     TCPConnector,
 )
+from aiohttp.typedefs import Middleware
 
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 
 
-def create_client(base_url: str | None = None, **kwargs) -> ClientSession:
+def create_client(
+    base_url: str | None = None, additional_middlewares: Sequence[ClientMiddlewareType] = [], **kwargs
+) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver)
     return ClientSession(
-        base_url, connector=connector, middlewares=[CloudflareMiddleware(), RetryableHandlerMiddleware()], **kwargs
+        base_url,
+        connector=connector,
+        middlewares=[
+            RetryableHandlerMiddleware(),
+            *additional_middlewares,
+            CloudflareMiddleware(),
+        ],
+        **kwargs,
     )
 
 
@@ -59,12 +69,6 @@ def retryable_client_session_generator[**P, R](
             yield item
 
     return wrapper
-
-
-class Middleware(ABC):
-    @abstractmethod
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        raise NotImplementedError
 
 
 class RetryableHandlerMiddleware(Middleware):

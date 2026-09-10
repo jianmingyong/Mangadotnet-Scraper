@@ -1,4 +1,3 @@
-from aiohttp.formdata import FormData
 import json
 from asyncio import sleep
 from base64 import b64encode
@@ -9,8 +8,17 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import IO, Any, Final, Literal, NotRequired, ReadOnly, Self, TypedDict, cast
 
-from aiohttp import ClientConnectionError, ClientSession
-from aiohttp.client_exceptions import ClientError, ClientResponseError
+from aiohttp import (
+    ClientConnectionError,
+    ClientError,
+    ClientHandlerType,
+    ClientRequest,
+    ClientResponse,
+    ClientResponseError,
+    ClientSession,
+    FormData,
+)
+from aiohttp.typedefs import Middleware
 from playwright.async_api import Browser, Error, TimeoutError
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.exceptions import (
@@ -116,6 +124,116 @@ class MangaDotNetCreateFromMangaBakaResponseManga(TypedDict):
     title: ReadOnly[str]
 
 
+class MangaDotNetLoginMiddleware(Middleware):
+    _UNAUTHORIZED_STATUS_CODE = 401
+    _AUTHENTICATION_COOKIE = "ory_kratos_session"
+
+    _config: Final[MangaDotNetScraperConfig]
+    _mangadotnet_api: Final[MangaDotNetApi]
+
+    def __init__(self, config: MangaDotNetScraperConfig, mangadotnet_api: MangaDotNetApi) -> None:
+        self._config = config
+        self._mangadotnet_api = mangadotnet_api
+
+    @property
+    def _user_session_cookie(self) -> str | None:
+        return self._config.mangadotnet_user_session
+
+    @_user_session_cookie.setter
+    def _user_session_cookie(self, value: str | None) -> None:
+        self._config.mangadotnet_user_session = value
+
+    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+        async def update_cookies_and_request() -> ClientResponse:
+            if self._user_session_cookie is not None:
+                request.update_cookies({self._AUTHENTICATION_COOKIE: self._user_session_cookie})
+                return await handler(request)
+            else:
+                return cast(ClientResponse, request.response) if request.response is not None else await handler(request)
+
+        response: ClientResponse = await update_cookies_and_request()
+
+        if response.status == self._UNAUTHORIZED_STATUS_CODE:
+            if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
+                raise UnauthorizedError("Mangadotnet session is invalid and requires authentication")
+
+            try:
+                async with (
+                    create_browser() as browser,
+                    await cast(Browser, browser).new_context() as context,
+                ):
+                    page = await context.new_page()
+
+                    async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
+                        await page.goto(f"{self._mangadotnet_api._BASE_API_URL}/login", wait_until="domcontentloaded")
+
+                        # Check for cloudflare
+                        try:
+                            await page.wait_for_selector('input[name="cf-turnstile-response"]', state="hidden")
+                            await solver.solve_captcha(
+                                captcha_container=page,
+                                captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                            )
+                        except (
+                            TimeoutError,
+                            CaptchaDetectionError,
+                            CaptchaDataDetectionError,
+                            CaptchaSolvingError,
+                            CaptchaApplyingError,
+                        ):
+                            pass
+
+                        username_element = await page.wait_for_selector("#identifier", state="attached", strict=True)
+                        if username_element is None:
+                            raise UnauthorizedError("Unable to find username field")
+                        await username_element.type(self._config.mangadotnet_username)
+
+                        password_element = await page.wait_for_selector("#password", state="attached", strict=True)
+                        if password_element is None:
+                            raise UnauthorizedError("Unable to find password field")
+                        await password_element.type(self._config.mangadotnet_password)
+
+                        try:
+                            await solver.solve_captcha(
+                                captcha_container=page,
+                                captcha_type=CaptchaType.CLOUDFLARE_TURNSTILE,
+                                expected_content_selector='form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
+                            )
+                        except (
+                            CaptchaDetectionError,
+                            CaptchaDataDetectionError,
+                            CaptchaSolvingError,
+                            CaptchaApplyingError,
+                        ):
+                            raise UnauthorizedError("Unable to solve CF captcha")
+
+                        submit_button = page.get_by_text("Log in", exact=True)
+
+                        while not page.is_closed() and await submit_button.is_disabled():
+                            await sleep(1)
+
+                        await submit_button.click()
+
+                    try:
+                        await page.wait_for_url(self._mangadotnet_api._BASE_API_URL, wait_until="commit")
+                    except TimeoutError:
+                        # login fail because of something...
+                        raise UnauthorizedError("Mangadotnet username or password are invalid")
+
+                    cookies = await context.cookies(self._mangadotnet_api._BASE_API_URL)
+
+                    for cookie in cookies:
+                        if cookie.get("name") == self._AUTHENTICATION_COOKIE:
+                            self._user_session_cookie = cookie.get("value")
+                            break
+
+                    response = await update_cookies_and_request()
+            except Error as error:
+                raise UnauthorizedError(error.message)
+
+        return response
+
+
 class MangaDotNetApi(AbstractAsyncContextManager):
     _BASE_API_URL = "https://mangadot.net"
     _AUTHENTICATION_COOKIE = "ory_kratos_session"
@@ -127,7 +245,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     _config: Final[MangaDotNetScraperConfig]
     _session: Final[ClientSession]
-    _user_session_cookie: str | None
     _tus_chunk_size: int
 
     @staticmethod
@@ -179,13 +296,12 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         self._config = config
-        self._session = create_client(self._BASE_API_URL, headers={"Origin": self._BASE_API_URL})
-        self._user_session_cookie = config.mangadotnet_user_session
+        self._session = create_client(
+            self._BASE_API_URL,
+            additional_middlewares=[MangaDotNetLoginMiddleware(config, self)],
+            headers={"Origin": self._BASE_API_URL},
+        )
         self._tus_chunk_size = config.upload_chunk_size
-
-    async def __aenter__(self) -> Self:
-        await self.initialize()
-        return self
 
     async def __aexit__(
         self,
@@ -195,80 +311,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         /,
     ) -> None:
         await self.close()
-
-    async def initialize(self) -> None:
-        async def check_auth_status() -> bool:
-            if self._user_session_cookie is not None:
-                self._session.cookie_jar.update_cookies({self._AUTHENTICATION_COOKIE: self._user_session_cookie})
-
-            user_profile = await self.get_user_profile()
-            return "profile" in user_profile
-
-        if await check_auth_status():
-            return
-
-        if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
-            raise UnauthorizedError("Mangadotnet session is invalid and requires authentication")
-
-        # We need to authenticate before it can be used...
-        try:
-            async with create_browser() as browser, await cast(Browser, browser).new_context() as context:
-                page = await context.new_page()
-
-                async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
-                    await page.goto(f"{self._BASE_API_URL}/login", wait_until="domcontentloaded")
-
-                    username_element = await page.wait_for_selector("#identifier", state="attached")
-                    if username_element is None:
-                        raise UnauthorizedError("Unable to find username field")
-                    await username_element.type(self._config.mangadotnet_username)
-
-                    password_element = await page.wait_for_selector("#password", state="attached")
-                    if password_element is None:
-                        raise UnauthorizedError("Unable to find password field")
-                    await password_element.type(self._config.mangadotnet_password)
-
-                    try:
-                        await page.wait_for_selector('input[name="cf-turnstile-response"]', state="attached")
-                        await solver.solve_captcha(
-                            captcha_container=page,
-                            captcha_type=CaptchaType.CLOUDFLARE_TURNSTILE,
-                            expected_content_selector="form > button[type=submit]",
-                        )
-                    except (
-                        CaptchaDetectionError,
-                        CaptchaDataDetectionError,
-                        CaptchaSolvingError,
-                        CaptchaApplyingError,
-                    ):
-                        raise UnauthorizedError("Unable to solve CF captcha")
-
-                    submit_button = page.get_by_text("Log in", exact=True).first
-
-                    while not page.is_closed() and await submit_button.is_disabled():
-                        await sleep(1)
-
-                    await submit_button.click()
-
-                try:
-                    await page.wait_for_url(self._BASE_API_URL, wait_until="domcontentloaded")
-                except TimeoutError:
-                    # login fail because of something...
-                    raise UnauthorizedError("Mangadotnet username or password are invalid")
-
-                cookies = await context.cookies(self._BASE_API_URL)
-
-                for cookie in cookies:
-                    if cookie.get("name") == self._AUTHENTICATION_COOKIE:
-                        self._user_session_cookie = cookie.get("value")
-                        break
-        except Error as error:
-            raise UnauthorizedError(error.message)
-
-        if await check_auth_status():
-            return
-        else:
-            raise UnauthorizedError("User not logged in. Maybe your username or password is incorrect.")
 
     async def close(self) -> None:
         await self._session.close()

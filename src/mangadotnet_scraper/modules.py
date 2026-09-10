@@ -200,7 +200,7 @@ class ArtLapsaModule(BaseModule):
 
                     @retryable_client_session
                     async def test_page_response(page_number: int, link: str):
-                        async with self._session.get(link) as test_response:
+                        async with self._session.head(link) as test_response:
                             if test_response.ok:
                                 pages.append(
                                     MangaPage(
@@ -361,7 +361,7 @@ class RitharScansModule(BaseModule):
 
                     @retryable_client_session
                     async def test_page_response(page_number: int, link: str):
-                        async with self._session.get(link) as test_response:
+                        async with self._session.head(link) as test_response:
                             if test_response.ok:
                                 pages.append(
                                     MangaPage(
