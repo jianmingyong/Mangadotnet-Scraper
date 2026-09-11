@@ -6,7 +6,7 @@ from collections.abc import Callable, Collection, Iterable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import IO, Any, Final, Literal, NotRequired, ReadOnly, Self, TypedDict, cast
+from typing import IO, Any, Final, Literal, NotRequired, ReadOnly, TypedDict, cast
 
 from aiohttp import (
     ClientConnectionError,
@@ -18,7 +18,6 @@ from aiohttp import (
     ClientSession,
     FormData,
 )
-from aiohttp.typedefs import Middleware
 from playwright.async_api import Browser, Error, TimeoutError
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.exceptions import (
@@ -30,7 +29,7 @@ from playwright_captcha.utils.exceptions import (
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.network import create_client, retryable_client_session
+from mangadotnet_scraper.network import Middleware, create_client, retryable_client_session
 
 
 class UnauthorizedError(Exception):
@@ -147,11 +146,9 @@ class MangaDotNetLoginMiddleware(Middleware):
         async def update_cookies_and_request() -> ClientResponse:
             if self._user_session_cookie is not None:
                 request.update_cookies({self._AUTHENTICATION_COOKIE: self._user_session_cookie})
-                return await handler(request)
-            else:
-                return cast(ClientResponse, request.response) if request.response is not None else await handler(request)
+            return await handler(request)
 
-        response: ClientResponse = await update_cookies_and_request()
+        response = await update_cookies_and_request()
 
         if response.status == self._UNAUTHORIZED_STATUS_CODE:
             if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
@@ -227,7 +224,7 @@ class MangaDotNetLoginMiddleware(Middleware):
                             self._user_session_cookie = cookie.get("value")
                             break
 
-                    response = await update_cookies_and_request()
+                    return await update_cookies_and_request()
             except Error as error:
                 raise UnauthorizedError(error.message)
 

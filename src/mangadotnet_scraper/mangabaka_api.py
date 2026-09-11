@@ -46,7 +46,6 @@ class MangaBakaApi(AbstractAsyncContextManager):
         _exc_type: type[BaseException] | None,
         _exc_value: BaseException | None,
         _traceback: TracebackType | None,
-        /,
     ) -> None:
         await self.close()
 

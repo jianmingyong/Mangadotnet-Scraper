@@ -1,7 +1,8 @@
+from abc import ABC, abstractmethod
 from asyncio import sleep
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from functools import wraps
-from typing import Final, cast
+from typing import Final
 
 from aiohttp import (
     AsyncResolver,
@@ -13,7 +14,6 @@ from aiohttp import (
     ClientSession,
     TCPConnector,
 )
-from aiohttp.typedefs import Middleware
 
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 
@@ -71,6 +71,11 @@ def retryable_client_session_generator[**P, R](
     return wrapper
 
 
+class Middleware(ABC):
+    @abstractmethod
+    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse: ...
+
+
 class RetryableHandlerMiddleware(Middleware):
     _REQUEST_TIMEOUT_STATUS_CODE = 408
     _TOO_MANY_REQUEST_STATUS_CODE = 429
@@ -84,24 +89,19 @@ class RetryableHandlerMiddleware(Middleware):
         self._max_retry = max_retry
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        response: ClientResponse = (
-            cast(ClientResponse, request.response) if request.response is not None else await handler(request)
-        )
-
         for retry in range(self._max_retry):
+            response = await handler(request)
+
             if response.status == self._REQUEST_TIMEOUT_STATUS_CODE:
                 # Request timed out. Safe to try this again.
                 await sleep(2 * (retry + 1))
-                response = await handler(request)
             elif response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
                 # Rate limited. Try again after X seconds from _RETRY_AFTER_HEADER.
                 retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
                 await sleep(int(retry_timer) if retry_timer is not None else (2 * (retry + 1)))
-                response = await handler(request)
             elif response.status == self._GATEWAY_TIMEOUT_STATUS_CODE:
                 # Gateway timed out. Safe to try this again.
                 await sleep(2 * (retry + 1))
-                response = await handler(request)
             else:
                 break
 
@@ -130,9 +130,7 @@ class CloudflareMiddleware(Middleware):
 
             return await handler(request)
 
-        response = (
-            cast(ClientResponse, request.response) if request.response is not None else await update_and_request()
-        )
+        response = await update_and_request()
 
         if response.headers.get("cf-mitigated") == "challenge":
             data = await get_cloudflare_cookies(str(request.url))
@@ -140,7 +138,6 @@ class CloudflareMiddleware(Middleware):
             if data is not None:
                 self._user_agent = data[0]
                 self._cookies.update({request.host: data[1]})
-
-                response = await update_and_request()
+                return await update_and_request()
 
         return response
