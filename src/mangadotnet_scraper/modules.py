@@ -106,165 +106,171 @@ class ArtLapsaModule(BaseModule):
     async def close(self) -> None:
         await self._session.close()
 
-    @retryable_client_session_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
-        async with self._session.get("/latest/") as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get("/latest/") as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+        elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
 
-            for element in elements:
-                yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
+        for element in elements:
+            yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
-    @retryable_client_session
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
-        async with self._session.get(link) as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get(link) as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            title_element = soup.find("h1")
-            title = clean_string(title_element.text) if title_element else ""
+        title_element = soup.find("h1")
+        title = clean_string(title_element.text) if title_element else ""
 
-            alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
-            alt_titles = [clean_string(e.text) for e in alt_titles_element]
+        alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
+        alt_titles = [clean_string(e.text) for e in alt_titles_element]
 
-            def is_chapter_link_element(tag: Tag) -> bool:
-                return (
-                    tag.name == "a"
-                    and tag.has_attr("href")
-                    and re.compile("/read/").search(str(tag.attrs["href"])) is not None
-                    and tag.find_parent("div", attrs={"id": "chapters"}) is not None
+        def is_chapter_link_element(tag: Tag) -> bool:
+            return (
+                tag.name == "a"
+                and tag.has_attr("href")
+                and re.compile("/read/").search(str(tag.attrs["href"])) is not None
+                and tag.find_parent("div", attrs={"id": "chapters"}) is not None
+            )
+
+        chapter_elements = soup.find_all(is_chapter_link_element)
+        chapters: list[MangaChapter] = []
+
+        for chapter_element in chapter_elements:
+            chapter_title = chapter_element.attrs.get("title")
+            if not chapter_title or not isinstance(chapter_title, str):
+                continue
+
+            title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+
+            if title_match:
+                chapter_number = float(title_match[1])
+            else:
+                continue
+
+            chapter_link = str(chapter_element.attrs.get("href"))
+
+            chapters.append(
+                MangaChapter(
+                    "en",
+                    self.display_name,
+                    chapter_number,
+                    None,
+                    f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
+                    f"{self._BASE_URL}{chapter_link}",
                 )
+            )
 
-            chapter_elements = soup.find_all(is_chapter_link_element)
-            chapters: list[MangaChapter] = []
+        return MangaDetail(title, alt_titles, chapters)
 
-            for chapter_element in chapter_elements:
-                chapter_title = chapter_element.attrs.get("title")
-                if not chapter_title or not isinstance(chapter_title, str):
-                    continue
-
-                title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
-
-                if title_match:
-                    chapter_number = float(title_match[1])
-                else:
-                    continue
-
-                chapter_link = str(chapter_element.attrs.get("href"))
-
-                chapters.append(
-                    MangaChapter(
-                        "en",
-                        self.display_name,
-                        chapter_number,
-                        None,
-                        f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
-                        f"{self._BASE_URL}{chapter_link}",
-                    )
-                )
-
-            return MangaDetail(title, alt_titles, chapters)
-
-    @retryable_client_session
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
-        async with self._session.get(chapter_link) as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get(chapter_link) as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
+        json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
 
-            if json_element is None:
+        if json_element is None:
+            return []
+
+        pages: list[MangaPage] = []
+
+        json_str = str(json_element.attrs.get("x-data")).strip()
+        match = re.search(r"pages\s*:\s*JSON\.parse\s*\(\s*(['\"])(.*?)\1\s*\)", json_str, re.DOTALL)
+
+        if match is None:
+            # This is a premium chapter, we can't actually get the data here so we might as well guess?
+            series_id = manga_link[manga_link.rfind("/") + 1 :]
+            chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
+            page = 1
+
+            revision_element = soup.find("script", attrs={"type": "application/ld+json"})
+
+            if revision_element is None:
                 return []
 
-            pages: list[MangaPage] = []
+            try:
+                revision_json = json.loads(revision_element.text)
+            except json.decoder.JSONDecodeError:
+                return []
 
-            json_str = str(json_element.attrs.get("x-data")).strip()
-            match = re.search(r"pages\s*:\s*JSON\.parse\s*\(\s*(['\"])(.*?)\1\s*\)", json_str, re.DOTALL)
+            revision_id = None
 
-            if match is None:
-                # This is a premium chapter, we can't actually get the data here so we might as well guess?
-                series_id = manga_link[manga_link.rfind("/") + 1 :]
-                chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
-                page = 1
+            if (
+                "image" in revision_json
+                and "url" in revision_json["image"]
+                and "/revisions/" in revision_json["image"]["url"]
+            ):
+                revision_id = str(revision_json["image"]["url"])
+                revision_id = revision_id[: revision_id.rfind("/")]
+                revision_id = revision_id[revision_id.rfind("/") + 1 :]
 
-                revision_element = soup.find("script", attrs={"type": "application/ld+json"})
-
-                if revision_element is None:
-                    return []
-
-                try:
-                    revision_json = json.loads(revision_element.text)
-                except json.decoder.JSONDecodeError:
-                    return []
-
-                revision_id = None
-
-                if (
-                    "image" in revision_json
-                    and "url" in revision_json["image"]
-                    and "/revisions/" in revision_json["image"]["url"]
-                ):
-                    revision_id = str(revision_json["image"]["url"])
-                    revision_id = revision_id[: revision_id.rfind("/")]
-                    revision_id = revision_id[revision_id.rfind("/") + 1 :]
-
-                @retryable_client_session
-                async def test_page_response(page_number: int, link: str) -> bool:
-                    async with self._session.head(link) as test_response:
-                        if test_response.ok:
-                            pages.append(
-                                MangaPage(page_number, link, {"format": "jpg", "size": test_response.content_length})
-                            )
-                            return True
-                        else:
-                            return False
-
-                while True:
-                    if await test_page_response(
-                        page,
-                        f"https://cdn.artlapsa.com/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
-                        if revision_id is None
-                        else f"https://cdn.artlapsa.com/series/webtoon/{series_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
-                    ):
-                        page += 1
+            @retryable_client_session
+            async def test_page_response(page_number: int, link: str) -> bool:
+                async with self._session.head(link) as test_response:
+                    if test_response.ok:
+                        pages.append(
+                            MangaPage(page_number, link, {"format": "jpg", "size": test_response.content_length})
+                        )
+                        return True
                     else:
-                        break
-            else:
-                encoded = match.group(2)
-                decoded = bytes(encoded, "utf-8").decode("unicode_escape")
+                        return False
 
-                try:
-                    json_obj = json.loads(decoded)
-                except json.decoder.JSONDecodeError:
-                    return []
+            while True:
+                if await test_page_response(
+                    page,
+                    f"https://cdn.artlapsa.com/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
+                    if revision_id is None
+                    else f"https://cdn.artlapsa.com/series/webtoon/{series_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
+                ):
+                    page += 1
+                else:
+                    break
+        else:
+            encoded = match.group(2)
+            decoded = bytes(encoded, "utf-8").decode("unicode_escape")
 
-                if isinstance(json_obj, list):
-                    json_pages = json_obj
+            try:
+                json_obj = json.loads(decoded)
+            except json.decoder.JSONDecodeError:
+                return []
 
-                    for i, page in zip(range(len(json_pages)), json_pages):
-                        if isinstance(page, dict):
-                            pages.append(
-                                MangaPage(
-                                    i,
-                                    f"{cast(str, page.get('path', '')).replace('\\', '')}",
-                                    {
-                                        "width": page.get("width"),
-                                        "height": page.get("height"),
-                                        "format": page.get("format"),
-                                        "size": page.get("size"),
-                                    },
-                                )
+            if isinstance(json_obj, list):
+                json_pages = json_obj
+
+                for i, page in zip(range(len(json_pages)), json_pages):
+                    if isinstance(page, dict):
+                        pages.append(
+                            MangaPage(
+                                i,
+                                f"{cast(str, page.get('path', '')).replace('\\', '')}",
+                                {
+                                    "width": page.get("width"),
+                                    "height": page.get("height"),
+                                    "format": page.get("format"),
+                                    "size": page.get("size"),
+                                },
                             )
+                        )
 
-            return pages
+        return pages
 
     @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
@@ -291,164 +297,170 @@ class RitharScansModule(BaseModule):
     async def close(self) -> None:
         await self._session.close()
 
-    @retryable_client_session_generator
     async def fetch_manga_listing(self) -> AsyncGenerator[tuple[str, str]]:
-        async with self._session.get("/latest") as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get("/latest") as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+        elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
 
-            for element in elements:
-                yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
+        for element in elements:
+            yield clean_string(str(element.attrs.get("title"))), clean_string(str(element.attrs.get("href")))
 
-    @retryable_client_session
     async def fetch_manga_detail(self, link: str) -> MangaDetail:
-        async with self._session.get(link) as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get(link) as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            title_element = soup.find("h1")
-            title = clean_string(title_element.text) if title_element else ""
+        title_element = soup.find("h1")
+        title = clean_string(title_element.text) if title_element else ""
 
-            alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
-            alt_titles = [clean_string(e.text) for e in alt_titles_element]
+        alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
+        alt_titles = [clean_string(e.text) for e in alt_titles_element]
 
-            def is_chapter_link_element(tag: Tag) -> bool:
-                return (
-                    tag.name == "a"
-                    and tag.has_attr("href")
-                    and re.compile("/read/").search(str(tag.attrs["href"])) is not None
-                    and tag.find_parent("div", attrs={"id": "chapters"}) is not None
+        def is_chapter_link_element(tag: Tag) -> bool:
+            return (
+                tag.name == "a"
+                and tag.has_attr("href")
+                and re.compile("/read/").search(str(tag.attrs["href"])) is not None
+                and tag.find_parent("div", attrs={"id": "chapters"}) is not None
+            )
+
+        chapter_elements = soup.find_all(is_chapter_link_element)
+        chapters: list[MangaChapter] = []
+
+        for chapter_element in chapter_elements:
+            chapter_title = chapter_element.attrs.get("title")
+            if not chapter_title or not isinstance(chapter_title, str):
+                continue
+
+            title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+            if title_match:
+                chapter_number = float(title_match[1])
+            else:
+                continue
+
+            chapter_link = str(chapter_element.attrs.get("href"))
+
+            chapters.append(
+                MangaChapter(
+                    "en",
+                    self.display_name,
+                    chapter_number,
+                    None,
+                    f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
+                    f"{self._BASE_URL}{chapter_link}",
                 )
+            )
 
-            chapter_elements = soup.find_all(is_chapter_link_element)
-            chapters: list[MangaChapter] = []
+        return MangaDetail(title, alt_titles, chapters)
 
-            for chapter_element in chapter_elements:
-                chapter_title = chapter_element.attrs.get("title")
-                if not chapter_title or not isinstance(chapter_title, str):
-                    continue
-
-                title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
-                if title_match:
-                    chapter_number = float(title_match[1])
-                else:
-                    continue
-
-                chapter_link = str(chapter_element.attrs.get("href"))
-
-                chapters.append(
-                    MangaChapter(
-                        "en",
-                        self.display_name,
-                        chapter_number,
-                        None,
-                        f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
-                        f"{self._BASE_URL}{chapter_link}",
-                    )
-                )
-
-            return MangaDetail(title, alt_titles, chapters)
-
-    @retryable_client_session
     async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
-        async with self._session.get(chapter_link) as response:
-            response.raise_for_status()
+        @retryable_client_session
+        async def get_html() -> str:
+            async with self._session.get(chapter_link) as response:
+                response.raise_for_status()
+                return await response.text("utf-8")
 
-            html = await response.text("utf-8")
-            soup = BeautifulSoup(html, "html.parser")
+        html = await get_html()
+        soup = BeautifulSoup(html, "html.parser")
 
-            json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
+        json_element = soup.find("div", attrs={"x-data": re.compile("^immersiveReader")})
 
-            if json_element is None:
+        if json_element is None:
+            return []
+
+        pages: list[MangaPage] = []
+
+        json_str = str(json_element.attrs.get("x-data")).strip()
+        match = re.search(r"pages\s*:\s*JSON\.parse\s*\(\s*(['\"])(.*?)\1\s*\)", json_str, re.DOTALL)
+
+        if match is None:
+            # This is a premium chapter, we can't actually get the data here so we might as well guess?
+            series_id = manga_link[manga_link.rfind("/") + 1 :]
+            chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
+            page = 1
+
+            revision_element = soup.find("script", attrs={"type": "application/ld+json"})
+
+            if revision_element is None:
                 return []
 
-            pages: list[MangaPage] = []
+            try:
+                revision_json = json.loads(revision_element.text)
+            except json.decoder.JSONDecodeError:
+                return []
 
-            json_str = str(json_element.attrs.get("x-data")).strip()
-            match = re.search(r"pages\s*:\s*JSON\.parse\s*\(\s*(['\"])(.*?)\1\s*\)", json_str, re.DOTALL)
+            revision_id = None
 
-            if match is None:
-                # This is a premium chapter, we can't actually get the data here so we might as well guess?
-                series_id = manga_link[manga_link.rfind("/") + 1 :]
-                chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
-                page = 1
+            if (
+                "image" in revision_json
+                and "url" in revision_json["image"]
+                and "/revisions/" in revision_json["image"]["url"]
+            ):
+                revision_id = str(revision_json["image"]["url"])
+                revision_id = revision_id[: revision_id.rfind("/")]
+                revision_id = revision_id[revision_id.rfind("/") + 1 :]
 
-                revision_element = soup.find("script", attrs={"type": "application/ld+json"})
-
-                if revision_element is None:
-                    return []
-
-                try:
-                    revision_json = json.loads(revision_element.text)
-                except json.decoder.JSONDecodeError:
-                    return []
-
-                revision_id = None
-
-                if (
-                    "image" in revision_json
-                    and "url" in revision_json["image"]
-                    and "/revisions/" in revision_json["image"]["url"]
-                ):
-                    revision_id = str(revision_json["image"]["url"])
-                    revision_id = revision_id[: revision_id.rfind("/")]
-                    revision_id = revision_id[revision_id.rfind("/") + 1 :]
-
-                @retryable_client_session
-                async def test_page_response(page_number: int, link: str) -> bool:
-                    async with self._session.head(link) as test_response:
-                        if test_response.ok:
-                            pages.append(
-                                MangaPage(page_number, link, {"format": "jpg", "size": test_response.content_length})
-                            )
-                            return True
-                        else:
-                            return False
-
-                while True:
-                    if await test_page_response(
-                        page,
-                        f"https://cdn.ritharscans.com/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
-                        if revision_id is None
-                        else f"https://cdn.ritharscans.com/series/webtoon/{series_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
-                    ):
-                        page += 1
+            @retryable_client_session
+            async def test_page_response(page_number: int, link: str) -> bool:
+                async with self._session.head(link) as test_response:
+                    if test_response.ok:
+                        pages.append(
+                            MangaPage(page_number, link, {"format": "jpg", "size": test_response.content_length})
+                        )
+                        return True
                     else:
-                        break
-            else:
-                encoded = match.group(2)
-                decoded = bytes(encoded, "utf-8").decode("unicode_escape")
+                        return False
 
-                try:
-                    json_obj = json.loads(decoded)
-                except json.decoder.JSONDecodeError:
-                    return []
+            while True:
+                if await test_page_response(
+                    page,
+                    f"https://cdn.ritharscans.com/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
+                    if revision_id is None
+                    else f"https://cdn.ritharscans.com/series/webtoon/{series_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
+                ):
+                    page += 1
+                else:
+                    break
+        else:
+            encoded = match.group(2)
+            decoded = bytes(encoded, "utf-8").decode("unicode_escape")
 
-                if isinstance(json_obj, list):
-                    json_pages = json_obj
+            try:
+                json_obj = json.loads(decoded)
+            except json.decoder.JSONDecodeError:
+                return []
 
-                    for i, page in zip(range(len(json_pages)), json_pages):
-                        if isinstance(page, dict):
-                            pages.append(
-                                MangaPage(
-                                    i,
-                                    f"{cast(str, page.get('path', '')).replace('\\', '')}",
-                                    {
-                                        "width": page.get("width"),
-                                        "height": page.get("height"),
-                                        "format": page.get("format"),
-                                        "size": page.get("size"),
-                                    },
-                                )
+            if isinstance(json_obj, list):
+                json_pages = json_obj
+
+                for i, page in zip(range(len(json_pages)), json_pages):
+                    if isinstance(page, dict):
+                        pages.append(
+                            MangaPage(
+                                i,
+                                f"{cast(str, page.get('path', '')).replace('\\', '')}",
+                                {
+                                    "width": page.get("width"),
+                                    "height": page.get("height"),
+                                    "format": page.get("format"),
+                                    "size": page.get("size"),
+                                },
                             )
+                        )
 
-            return pages
+        return pages
 
     @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
