@@ -11,6 +11,7 @@ from aiohttp import (
     ClientMiddlewareType,
     ClientRequest,
     ClientResponse,
+    ClientResponseError,
     ClientSession,
     TCPConnector,
 )
@@ -36,7 +37,11 @@ def create_client(
 
 
 def retryable_client_session[**P, R](
-    async_func: Callable[P, Coroutine[None, None, R]], max_retry: int = 5
+    async_func: Callable[P, Coroutine[None, None, R]],
+    max_retry: int = 5,
+    retryable_status: Callable[[ClientResponseError], bool] = lambda x: (
+        x.headers is not None and x.headers.get("cf-mitigated") == "challenge"
+    ),
 ) -> Callable[P, Coroutine[None, None, R]]:
     @wraps(async_func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -46,6 +51,13 @@ def retryable_client_session[**P, R](
             except ClientConnectionError:
                 # Connect failed or disconnect from internet.
                 await sleep(2 * (retry + 1))
+            except ClientResponseError as error:
+                # Client received non ok status.
+                if retryable_status(error):
+                    await sleep(2 * (retry + 1))
+                else:
+                    raise
+
         return await async_func(*args, **kwargs)
 
     return wrapper
@@ -73,7 +85,8 @@ def retryable_client_session_generator[**P, R](
 
 class Middleware(ABC):
     @abstractmethod
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse: ...
+    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+        return await handler(request)
 
 
 class RetryableHandlerMiddleware(Middleware):

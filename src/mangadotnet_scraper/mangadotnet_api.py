@@ -32,11 +32,6 @@ from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.network import Middleware, create_client, retryable_client_session
 
 
-class UnauthorizedError(Exception):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
 class MangaDotNetResponseError(TypedDict):
     success: NotRequired[ReadOnly[Literal[False]]]
     error: str
@@ -152,7 +147,13 @@ class MangaDotNetLoginMiddleware(Middleware):
 
         if response.status == self._UNAUTHORIZED_STATUS_CODE:
             if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
-                raise UnauthorizedError("Mangadotnet session is invalid and requires authentication")
+                raise ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message="Authentication requires both username and password",
+                    headers=response.headers,
+                )
 
             try:
                 async with (
@@ -182,12 +183,24 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                         username_element = await page.wait_for_selector("#identifier", state="attached", strict=True)
                         if username_element is None:
-                            raise UnauthorizedError("Unable to find username field")
+                            raise ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message="Unable to find username field",
+                                headers=response.headers,
+                            )
                         await username_element.type(self._config.mangadotnet_username)
 
                         password_element = await page.wait_for_selector("#password", state="attached", strict=True)
                         if password_element is None:
-                            raise UnauthorizedError("Unable to find password field")
+                            raise ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message="Unable to find password field",
+                                headers=response.headers,
+                            )
                         await password_element.type(self._config.mangadotnet_password)
 
                         try:
@@ -202,7 +215,13 @@ class MangaDotNetLoginMiddleware(Middleware):
                             CaptchaSolvingError,
                             CaptchaApplyingError,
                         ):
-                            raise UnauthorizedError("Unable to solve CF captcha")
+                            raise ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message="Unable to solve CF captcha",
+                                headers=response.headers,
+                            )
 
                         submit_button = page.get_by_text("Log in", exact=True)
 
@@ -215,7 +234,13 @@ class MangaDotNetLoginMiddleware(Middleware):
                         await page.wait_for_url(self._mangadotnet_api._BASE_API_URL, wait_until="commit")
                     except TimeoutError:
                         # login fail because of something...
-                        raise UnauthorizedError("Mangadotnet username or password are invalid")
+                        raise ClientResponseError(
+                            response.request_info,
+                            response.history,
+                            status=response.status,
+                            message="Mangadotnet username or password are invalid",
+                            headers=response.headers,
+                        )
 
                     cookies = await context.cookies(self._mangadotnet_api._BASE_API_URL)
 
@@ -226,7 +251,13 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                     return await update_cookies_and_request()
             except Error as error:
-                raise UnauthorizedError(error.message)
+                raise ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=error.message,
+                    headers=response.headers,
+                )
 
         return response
 

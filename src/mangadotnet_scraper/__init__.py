@@ -419,6 +419,9 @@ async def upload_chapters(
                         pages = await module.fetch_manga_pages(manga_link, chapter_link)
                         pages_count = len(pages)
 
+                        if len(pages) == 0:
+                            return
+
                         current_progress.update(task_id, total=pages_count, status="Downloading Image")
 
                         zip_buffer = BytesIO()
