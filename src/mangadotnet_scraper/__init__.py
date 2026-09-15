@@ -1,3 +1,4 @@
+from mangadotnet_scraper.mangabaka_api import MangaBakaEntryData, MangaBakaError
 import asyncio
 import logging
 from asyncio import Semaphore, sleep
@@ -72,6 +73,7 @@ async def initialize_async() -> None:
                         Choice("Fetch Listing", 1),
                         Choice("Fetch Listing Details With Mapping", 2),
                         Choice("Fetch Listing Details Without Mapping", 3),
+                        Choice("Manual Mapping", 5),
                         Choice("Upload", 4),
                         Choice("Quit", -1),
                     ],
@@ -184,13 +186,31 @@ async def initialize_async() -> None:
                             await upload_chapters(module, config, data, mangadotnet_api)
                     else:
                         continue
+                elif selection == 5:
+                    selection = await questionary.select(
+                        "Which Module(s) to Manual Mapping",
+                        choices=[
+                            *generate_choices("Map"),
+                            Choice("Back", -1),
+                        ],
+                    ).ask_async()
+
+                    if 0 <= selection < len(modules):
+                        async with (
+                            MangaBakaApi() as mangabaka_api,
+                            MangaDotNetApi(config) as mangadotnet_api,
+                            modules[selection] as module,
+                        ):
+                            await manual_entry_matching(module, config, data, mangabaka_api, mangadotnet_api)
+                    else:
+                        continue
                 else:
                     break
     finally:
         config.save_config()
 
 
-async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData):
+async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData) -> None:
     with Progress(SpinnerColumn(), TextColumn("Fetching {task.description} Listing"), transient=True) as progress:
         progress.add_task(module.display_name, total=None)
 
@@ -337,8 +357,12 @@ async def fetch_module_listing_details(
                     module_manga = ModuleManga(detail.title, detail.alt_titles, mangabaka_id, mangadotnet_id, chapters)
 
                     data.add_module_manga(rowid, module_manga)
-                except ClientError:
-                    total_progress.print(f"Error fetching {title}")
+                except ClientError as error:
+                    if isinstance(error, ClientResponseError) and error.code == 404:
+                        # Link is probably no longer valid, let's just purge them.
+                        data.remove_module_manga(rowid)
+                    else:
+                        total_progress.print(f"Error fetching {title}")
                 finally:
                     current_progress.remove_task(task_id)
                     total_progress.advance(total_progress_task_id)
@@ -444,6 +468,9 @@ async def upload_chapters(
                                 has_error = True
 
                         if has_error:
+                            logging.getLogger().info(
+                                f"Download Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                            )
                             return
 
                         zip_file_size = zip_buffer.tell()
@@ -582,3 +609,76 @@ async def upload_chapters(
             total_progress.advance(total_progress_task)
 
         total_progress.print(f"Done upload {module.display_name}")
+
+
+async def manual_entry_matching(
+    module: BaseModule,
+    config: MangaDotNetScraperConfig,
+    data: MangaDotNetScraperData,
+    mangabaka_api: MangaBakaApi,
+    mangadotnet_api: MangaDotNetApi,
+) -> None:
+    while True:
+        _count, module_listing = data.get_module_listing_non_mapped(module.module_id)
+
+        unmapped_listing = [
+            (rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id)
+            for rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
+        ]
+
+        choices = [
+            Choice(f"[{rowid}] {title}", rowid)
+            for rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id in unmapped_listing
+        ]
+
+        selection = await questionary.select(
+            "What would you like to do?",
+            choices=[
+                *choices,
+                Choice("Quit", -1),
+            ],
+        ).ask_async()
+
+        if selection == -1:
+            break
+        else:
+            entry = next(filter(lambda x: x[0] == selection, unmapped_listing))
+
+            print(f"[{entry[0]}] {entry[2]}")
+            print("Link:", entry[1])
+            print("Alt Titles:")
+
+            for item in str(entry[3]).splitlines():
+                print(item)
+
+            def check_for_int_or_skip(input: str) -> bool:
+                return input.lower().strip() == "skip" or input.isdigit()
+
+            while True:
+                selection: str = await questionary.text(
+                    "Enter MangaBaka Id or Skip:",
+                    validate=check_for_int_or_skip,
+                ).ask_async()
+
+                if selection == "skip":
+                    break
+                else:
+                    mangabaka_id = int(selection)
+                    mangabaka_entry = await mangabaka_api.get_entry_by_id(mangabaka_id)
+
+                    if "status" in mangabaka_entry and mangabaka_entry["status"] != 200:
+                        print("Invalid id, try again.")
+                        continue
+
+                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
+
+                    if mangadotnet_id is None:
+                        response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
+                        mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
+
+                    if mangadotnet_id is None:
+                        print("Unable to create mangadot id...")
+                        break
+
+                    data.update_manual_mapping(entry[0], mangabaka_id, mangadotnet_id)
+                    break

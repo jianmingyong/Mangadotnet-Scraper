@@ -37,6 +37,7 @@ class MangaDotNetScraperData(AbstractContextManager):
         self._config = config
         self._connection = sqlite3_connect(config.data_file, autocommit=False)
         self.initialize()
+        self._connection.execute("PRAGMA foreign_keys = 1;")
 
     def __exit__(
         self,
@@ -65,47 +66,7 @@ class MangaDotNetScraperData(AbstractContextManager):
             for table_name, version in cursor:
                 table_version[table_name] = version
 
-            if table_version.get("module_chapter", 1) == 1:
-                connection.execute(
-                    """
-                    CREATE TABLE module_chapter_temp(
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        manga_rowid     INTEGER NOT NULL,
-                        language        TEXT NOT NULL DEFAULT "en",
-                        scanlator_group TEXT NOT NULL,
-                        chapter_number  REAL NOT NULL,
-                        volume_number   REAL DEFAULT NULL,
-                        chapter_title   TEXT NOT NULL,
-                        link            TEXT NOT NULL,
-                        uploaded        INTEGER NOT NULL DEFAULT 0,
-                        skip_upload     INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (manga_rowid, language ASC, scanlator_group ASC, chapter_number ASC)
-                    );
-                    """
-                )
-
-                connection.execute(
-                    """
-                    INSERT INTO module_chapter_temp(
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        chapter_number,
-                        chapter_title,
-                        link,
-                        uploaded,
-                        skip_upload
-                    )
-                    SELECT ref_id, language, scanlator_group, number, chapter_title, link, uploaded, skip_upload
-                    FROM module_chapter;
-                    """
-                )
-
-                connection.execute("DROP TABLE module_chapter;")
-                connection.execute("ALTER TABLE module_chapter_temp RENAME TO module_chapter;")
-                connection.execute("INSERT INTO db_version(table_name, version) VALUES (?, ?);", ("module_chapter", 2))
-
-            if table_version.get("module_manga", 1) == 1:
+            if table_version.get("module_manga", 1) < 2:
                 connection.execute(
                     """
                     CREATE TABLE module_manga_temp(
@@ -145,6 +106,126 @@ class MangaDotNetScraperData(AbstractContextManager):
                 connection.execute("DROP TABLE module_manga;")
                 connection.execute("ALTER TABLE module_manga_temp RENAME TO module_manga;")
                 connection.execute("INSERT INTO db_version(table_name, version) VALUES (?, ?);", ("module_manga", 2))
+
+            if table_version.get("module_manga", 1) < 3:
+                connection.execute(
+                    """
+                    CREATE TABLE module_manga_temp(
+                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        module_id       TEXT    NOT NULL,
+                        link            TEXT    NOT NULL,
+                        title           TEXT    DEFAULT NULL,
+                        alt_titles      TEXT    DEFAULT NULL,
+                        mangabaka_id    INTEGER DEFAULT NULL,
+                        mangadotnet_id  INTEGER DEFAULT NULL,
+                        last_checked    INTEGER DEFAULT NULL,
+                        manual_override INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE (module_id, link)
+                    );
+                    """
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO module_manga_temp(
+                        rowid,
+                        module_id,
+                        link,
+                        title,
+                        alt_titles,
+                        mangabaka_id,
+                        mangadotnet_id,
+                        last_checked,
+                        manual_override
+                    )
+                    SELECT rowid, module_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override
+                    FROM module_manga;
+                    """
+                )
+
+                connection.execute("DROP TABLE module_manga;")
+                connection.execute("ALTER TABLE module_manga_temp RENAME TO module_manga;")
+                connection.execute("UPDATE db_version SET version = ? WHERE table_name = ?;", (3, "module_manga"))
+
+            if table_version.get("module_chapter", 1) < 2:
+                connection.execute(
+                    """
+                    CREATE TABLE module_chapter_temp(
+                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        manga_rowid     INTEGER NOT NULL,
+                        language        TEXT NOT NULL DEFAULT "en",
+                        scanlator_group TEXT NOT NULL,
+                        chapter_number  REAL NOT NULL,
+                        volume_number   REAL DEFAULT NULL,
+                        chapter_title   TEXT NOT NULL,
+                        link            TEXT NOT NULL,
+                        uploaded        INTEGER NOT NULL DEFAULT 0,
+                        skip_upload     INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE (manga_rowid, language ASC, scanlator_group ASC, chapter_number ASC)
+                    );
+                    """
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO module_chapter_temp(
+                        manga_rowid,
+                        language,
+                        scanlator_group,
+                        chapter_number,
+                        chapter_title,
+                        link,
+                        uploaded,
+                        skip_upload
+                    )
+                    SELECT ref_id, language, scanlator_group, number, chapter_title, link, uploaded, skip_upload
+                    FROM module_chapter;
+                    """
+                )
+
+                connection.execute("DROP TABLE module_chapter;")
+                connection.execute("ALTER TABLE module_chapter_temp RENAME TO module_chapter;")
+                connection.execute("INSERT INTO db_version(table_name, version) VALUES (?, ?);", ("module_chapter", 2))
+
+            if table_version.get("module_chapter", 1) < 3:
+                connection.execute(
+                    """
+                    CREATE TABLE module_chapter_temp(
+                        manga_rowid     INTEGER NOT NULL,
+                        language        TEXT NOT NULL DEFAULT "en",
+                        scanlator_group TEXT NOT NULL,
+                        chapter_number  REAL NOT NULL,
+                        volume_number   REAL DEFAULT NULL,
+                        chapter_title   TEXT NOT NULL,
+                        link            TEXT NOT NULL,
+                        uploaded        INTEGER NOT NULL DEFAULT 0,
+                        skip_upload     INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE (manga_rowid, language ASC, scanlator_group ASC, chapter_number ASC),
+                        FOREIGN KEY (manga_rowid) REFERENCES module_manga(rowid) ON UPDATE CASCADE ON DELETE CASCADE
+                    );
+                    """
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO module_chapter_temp(
+                        manga_rowid,
+                        language,
+                        scanlator_group,
+                        chapter_number,
+                        chapter_title,
+                        link,
+                        uploaded,
+                        skip_upload
+                    )
+                    SELECT manga_rowid, language, scanlator_group, chapter_number, chapter_title, link, uploaded, skip_upload
+                    FROM module_chapter;
+                    """
+                )
+
+                connection.execute("DROP TABLE module_chapter;")
+                connection.execute("ALTER TABLE module_chapter_temp RENAME TO module_chapter;")
+                connection.execute("UPDATE db_version SET version = ? WHERE table_name = ?;", (3, "module_chapter"))
 
     def close(self) -> None:
         self._connection.close()
@@ -198,6 +279,40 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         return count.fetchone()[0], cursor
 
+    def get_module_listing_non_mapped(self, module_id: str) -> tuple[int, Cursor]:
+        count = self._execute(
+            t"""
+            SELECT COUNT(*)
+            FROM module_manga
+            WHERE module_id = {module_id} AND mangadotnet_id IS NULL;
+            """
+        )
+
+        cursor = self._execute(
+            t"""
+            SELECT rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id
+            FROM module_manga
+            WHERE module_id = {module_id} AND mangadotnet_id IS NULL
+            ORDER BY rowid ASC;
+            """
+        )
+
+        return count.fetchone()[0], cursor
+
+    def update_manual_mapping(self, rowid: int, mangabaka_id: int, mangadotnet_id: int) -> None:
+        with self._connection:
+            self._execute(
+                t"""
+                UPDATE module_manga
+                SET
+                    mangabaka_id = {mangabaka_id},
+                    mangadotnet_id = {mangadotnet_id},
+                    manual_override = 1
+                WHERE
+                    rowid = {rowid};
+                """
+            )
+
     def add_module_manga(self, rowid: int, manga: ModuleManga) -> None:
         with self._connection:
             self._execute(
@@ -245,6 +360,10 @@ class MangaDotNetScraperData(AbstractContextManager):
                         chapter_number = {chapter.chapter_number};
                     """
                 )
+
+    def remove_module_manga(self, rowid: int) -> None:
+        with self._connection:
+            self._execute(t"DELETE FROM module_manga WHERE rowid = {rowid};")
 
     def get_non_uploaded_manga(self, module_id: str) -> tuple[int, Cursor]:
         count = self._execute(
