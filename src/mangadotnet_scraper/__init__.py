@@ -666,7 +666,7 @@ async def manual_entry_matching(
                     mangabaka_id = int(selection)
                     mangabaka_entry = await mangabaka_api.get_entry_by_id(mangabaka_id)
 
-                    if "status" in mangabaka_entry and mangabaka_entry["status"] != 200:
+                    if "id" not in mangabaka_entry:
                         print("Invalid id, try again.")
                         continue
 
