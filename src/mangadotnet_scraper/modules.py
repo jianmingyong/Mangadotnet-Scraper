@@ -2,7 +2,7 @@ import json
 import mimetypes
 import re
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable, Collection
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.network import create_client, retryable_client_session, retryable_client_session_generator
-from mangadotnet_scraper.utilities import clean_string
+from mangadotnet_scraper.utilities import clean_string, safe_dict_get
 
 
 @dataclass(frozen=True)
@@ -52,10 +52,17 @@ class BaseModule(AbstractAsyncContextManager):
     module_id: Final[str]
     display_name: Final[str]
 
+    fetch_concurrency: int
+    download_concurrency: int
+    upload_concurrency: int
+
     def __init__(self, config: MangaDotNetScraperConfig, module_id: str, display_name: str) -> None:
         self._config = config
         self.module_id = module_id
         self.display_name = display_name
+        self.fetch_concurrency = config.fetch_concurrency
+        self.download_concurrency = config.download_concurrency
+        self.upload_concurrency = config.upload_concurrency
 
     async def __aenter__(self) -> Self:
         await self.initialize()
@@ -633,6 +640,184 @@ class EzMangaModule(BaseModule):
                 )
 
         return manga_pages
+
+    @retryable_client_session
+    async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
+        async with self._session.get(page.link) as response:
+            response.raise_for_status()
+
+            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
+            data = await response.read()
+
+            return MangaImage(filename, data)
+
+
+class NyxScansModule(BaseModule):
+    _BASE_URL = "https://nyxscans.com"
+    _BASE_API_URL = "https://api.nyxscans.com"
+
+    _session: ClientSession
+
+    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+        super().__init__(config, "nyx_scans", "Nyx Scans")
+
+    async def initialize(self) -> None:
+        self._session = create_client(
+            base_url=self._BASE_API_URL,
+            headers={
+                "Origin": self._BASE_URL,
+            },
+        )
+        self.fetch_concurrency = 1
+        self.upload_concurrency = 1
+
+    async def close(self) -> None:
+        await self._session.close()
+
+    class PostsResponse(TypedDict):
+        posts: Collection[NyxScansModule.PostsResponsePost]
+        totalCount: int
+
+    class PostsResponsePost(TypedDict):
+        slug: str
+        postTitle: str
+
+    async def fetch_manga_listing(self) -> AsyncIterable[tuple[str, str]]:
+        @retryable_client_session
+        async def fetch_listing(page: int = 1) -> self.PostsResponse:
+            async with self._session.get(
+                "/api/posts", params={"page": page, "perPage": 100, "isNovel": "false", "tag": "new"}
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+
+        page = 1
+        has_next_page = True
+
+        while has_next_page:
+            json = await fetch_listing(page)
+
+            for post in safe_dict_get(json, "posts", type=Collection[self.PostsResponsePost], default=[]):
+                yield clean_string(post["postTitle"]), f"{self._BASE_URL}/series/{clean_string(post['slug'])}"
+
+            has_next_page = page * 100 < safe_dict_get(json, "totalCount", type=int, default=0)
+            page += 1
+
+    class PostResponse(TypedDict):
+        post: NyxScansModule.PostDetail
+
+    class PostDetail(TypedDict):
+        postTitle: str
+        alternativeTitles: str
+        chapters: Collection[NyxScansModule.PostDetailChapter]
+
+    class PostDetailChapter(TypedDict):
+        id: int
+        slug: str
+        number: float
+        title: str
+        isLocked: bool
+
+    async def fetch_manga_detail(self, link: str) -> MangaDetail:
+        @retryable_client_session
+        async def fetch_detail(slug: str) -> self.PostResponse:
+            async with self._session.get("/api/post", params={"postSlug": slug}) as response:
+                response.raise_for_status()
+                return await response.json()
+
+        slug = link[link.rfind("/") + 1 :]
+
+        json = await fetch_detail(slug)
+
+        title = safe_dict_get(json, "post", "postTitle", type=str, default="")
+        alt_titles = safe_dict_get(json, "post", "alternativeTitles", type=str, default="").splitlines()
+
+        chapters = []
+
+        for chapter in safe_dict_get(json, "post", "chapters", type=Collection[self.PostDetailChapter], default=[]):
+            if safe_dict_get(chapter, "isLocked", type=bool, default=False):
+                continue
+
+            chapter_title = safe_dict_get(chapter, "title", type=str | None)
+
+            if chapter_title is None:
+                chapter_title = f"Chapter {safe_dict_get(chapter, 'number', type=float, default=0):.1f}".rstrip(
+                    "0"
+                ).rstrip(".")
+
+            chapters.append(
+                MangaChapter(
+                    "en",
+                    self.display_name,
+                    safe_dict_get(chapter, "number", type=float, default=0),
+                    None,
+                    chapter_title,
+                    f"{self._BASE_URL}/{slug}/{safe_dict_get(chapter, 'slug', type=str, default='')}",
+                )
+            )
+
+        return MangaDetail(title, alt_titles, chapters)
+
+    class ChapterResponse(TypedDict):
+        chapter: NyxScansModule.ChapterResponseObject
+
+    class ChapterResponseObject(TypedDict):
+        images: Collection[NyxScansModule.ChapterResponseObjectImages]
+
+    class ChapterResponseObjectImages(TypedDict):
+        id: int
+        url: str
+        width: int
+        height: int
+        order: int
+
+    async def fetch_manga_pages(self, manga_link: str, chapter_link: str) -> list[MangaPage]:
+        @retryable_client_session
+        async def fetch_detail(slug: str) -> self.PostResponse:
+            async with self._session.get("/api/post", params={"postSlug": slug}) as response:
+                response.raise_for_status()
+                return await response.json()
+
+        @retryable_client_session
+        async def fetch_pages(id: int) -> self.ChapterResponse:
+            async with self._session.get("/api/chapter", params={"chapterId": id}) as response:
+                response.raise_for_status()
+                return await response.json()
+
+        manga_slug = manga_link[manga_link.rfind("/") + 1 :]
+        chapter_slug = chapter_link[chapter_link.rfind("/") + 1 :]
+
+        detail_json = await fetch_detail(manga_slug)
+
+        for chapter in safe_dict_get(
+            detail_json, "post", "chapters", type=Collection[self.PostDetailChapter], default=[]
+        ):
+            if chapter_slug != safe_dict_get(chapter, "slug", type=str):
+                continue
+
+            # Chapter Found, get the id
+            chapter_id = safe_dict_get(chapter, "id", type=int)
+
+            if chapter_id is None:
+                return []
+
+            pages = await fetch_pages(chapter_id)
+            manga_pages = []
+
+            for page in safe_dict_get(
+                pages, "chapter", "images", type=Collection[self.ChapterResponseObjectImages], default=[]
+            ):
+                manga_pages.append(
+                    MangaPage(
+                        safe_dict_get(page, "order", type=int, default=0),
+                        safe_dict_get(page, "url", type=str, default=""),
+                        data={"width": safe_dict_get(page, "width"), "height": safe_dict_get(page, "height")},
+                    )
+                )
+
+            return manga_pages
+
+        return []
 
     @retryable_client_session
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:

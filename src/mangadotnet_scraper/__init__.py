@@ -1,4 +1,3 @@
-from mangadotnet_scraper.mangabaka_api import MangaBakaEntryData, MangaBakaError
 import asyncio
 import logging
 from asyncio import Semaphore, sleep
@@ -32,7 +31,14 @@ from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.data import MangaDotNetScraperData, ModuleChapter, ModuleManga
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.modules import ArtLapsaModule, BaseModule, EzMangaModule, MangaPage, RitharScansModule
+from mangadotnet_scraper.modules import (
+    ArtLapsaModule,
+    BaseModule,
+    EzMangaModule,
+    MangaPage,
+    NyxScansModule,
+    RitharScansModule,
+)
 
 
 def initialize() -> None:
@@ -56,7 +62,12 @@ async def initialize_async() -> None:
     config = MangaDotNetScraperConfig()
     config.load_config()
 
-    modules: list[BaseModule] = [ArtLapsaModule(config), RitharScansModule(config), EzMangaModule(config)]
+    modules: list[BaseModule] = [
+        ArtLapsaModule(config),
+        RitharScansModule(config),
+        EzMangaModule(config),
+        NyxScansModule(config),
+    ]
 
     def generate_choices(text: str, start_index: int = 0) -> list[Choice]:
         return [
@@ -113,7 +124,7 @@ async def initialize_async() -> None:
                             for module in modules:
                                 async with module:
                                     await fetch_module_listing_details(
-                                        module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                                        module, data, mangabaka_api, mangadotnet_api, only_old_entries=False
                                     )
                     elif 0 <= selection < len(modules):
                         async with (
@@ -122,7 +133,7 @@ async def initialize_async() -> None:
                             modules[selection] as module,
                         ):
                             await fetch_module_listing_details(
-                                module, config, data, mangabaka_api, mangadotnet_api, only_old_entries=False
+                                module, data, mangabaka_api, mangadotnet_api, only_old_entries=False
                             )
                     else:
                         continue
@@ -142,7 +153,6 @@ async def initialize_async() -> None:
                                 async with module:
                                     await fetch_module_listing_details(
                                         module,
-                                        config,
                                         data,
                                         mangabaka_api,
                                         mangadotnet_api,
@@ -157,7 +167,6 @@ async def initialize_async() -> None:
                         ):
                             await fetch_module_listing_details(
                                 module,
-                                config,
                                 data,
                                 mangabaka_api,
                                 mangadotnet_api,
@@ -201,7 +210,7 @@ async def initialize_async() -> None:
                             MangaDotNetApi(config) as mangadotnet_api,
                             modules[selection] as module,
                         ):
-                            await manual_entry_matching(module, config, data, mangabaka_api, mangadotnet_api)
+                            await manual_entry_matching(module, data, mangabaka_api, mangadotnet_api)
                     else:
                         continue
                 else:
@@ -226,7 +235,6 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
 
 async def fetch_module_listing_details(
     module: BaseModule,
-    config: MangaDotNetScraperConfig,
     data: MangaDotNetScraperData,
     mangabaka_api: MangaBakaApi,
     mangadotnet_api: MangaDotNetApi,
@@ -235,6 +243,7 @@ async def fetch_module_listing_details(
     skip_mapping: bool = False,
 ) -> None:
     total_progress = Progress(
+        BarColumn(bar_width=None),
         TextColumn("Fetching {task.description} Details"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
@@ -246,7 +255,7 @@ async def fetch_module_listing_details(
         listing_count, listing = data.get_module_listing(module.module_id, only_old_entries)
         total_progress_task_id = total_progress.add_task(module.display_name, total=listing_count)
 
-        semaphore = Semaphore(config.fetch_concurrency)
+        semaphore = Semaphore(module.fetch_concurrency)
 
         async def fetch_manga_detail_task(
             rowid: int,
@@ -301,11 +310,13 @@ async def fetch_module_listing_details(
                                             response["manga"]["id"] if response["success"] == True else None
                                         )
                                 else:
-                                    mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                        [detail.title, *detail.alt_titles]
-                                    )
-                                    if mangadotnet_entry is not None:
-                                        mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
+                                    pass
+                                    # This is too slow or often not working... need to optimize this before using again.
+                                    # mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                    #    [detail.title, *detail.alt_titles]
+                                    # )
+                                    # if mangadotnet_entry is not None:
+                                    #    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
                         else:
                             mangabaka_entry = await mangabaka_api.get_entry_by_title([detail.title, *detail.alt_titles])
 
@@ -323,11 +334,13 @@ async def fetch_module_listing_details(
                                     response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
                                     mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
                             else:
-                                mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                    [detail.title, *detail.alt_titles]
-                                )
-                                if mangadotnet_entry is not None:
-                                    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
+                                pass
+                                # This is too slow or often not working... need to optimize this before using again.
+                                # mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                #    [detail.title, *detail.alt_titles]
+                                # )
+                                # if mangadotnet_entry is not None:
+                                #    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
 
                     def is_chapter_uploaded(chapter: ModuleChapter, mangadotnet_chapters: list[Any]) -> bool:
                         for mangadotnet_chapter in mangadotnet_chapters:
@@ -383,7 +396,10 @@ async def upload_chapters(
     mangadotnet_api: MangaDotNetApi,
 ):
     total_progress = Progress(
-        TextColumn("Upload {task.description} Overall"), BarColumn(bar_width=None), MofNCompleteColumn()
+        BarColumn(bar_width=None),
+        TextColumn("Upload {task.description} Overall"),
+        BarColumn(bar_width=None),
+        MofNCompleteColumn(),
     )
     current_progress_title = Progress(TextColumn("{task.fields[status]} ({task.fields[count]})"))
 
@@ -416,7 +432,7 @@ async def upload_chapters(
                 for manga_rowid, language, scanlator_group, chapter_number, volume_number, chapter_title, link in chapters
             ]
 
-            upload_semaphore = Semaphore(config.upload_concurrency)
+            upload_semaphore = Semaphore(module.upload_concurrency)
 
             async def upload_chapter_task(
                 upload_semaphore: Semaphore,
@@ -455,7 +471,7 @@ async def upload_chapters(
                         has_error = False
 
                         with ZipFile(zip_buffer, "a", ZIP_DEFLATED, compresslevel=9) as zip_file:
-                            download_semaphore = Semaphore(config.download_concurrency)
+                            download_semaphore = Semaphore(module.download_concurrency)
 
                             async def download_image_task(page: MangaPage) -> None:
                                 async with download_semaphore:
@@ -616,7 +632,6 @@ async def upload_chapters(
 
 async def manual_entry_matching(
     module: BaseModule,
-    config: MangaDotNetScraperConfig,
     data: MangaDotNetScraperData,
     mangabaka_api: MangaBakaApi,
     mangadotnet_api: MangaDotNetApi,
@@ -666,22 +681,32 @@ async def manual_entry_matching(
                 if selection == "skip":
                     break
                 else:
-                    mangabaka_id = int(selection)
-                    mangabaka_entry = await mangabaka_api.get_entry_by_id(mangabaka_id)
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("Fetching {task.fields[task]}", markup=False),
+                        transient=True,
+                    ) as progress:
+                        task = progress.add_task("", total=None, task="MangaBaka Entry")
 
-                    if "id" not in mangabaka_entry:
-                        print("Invalid id, try again.")
-                        continue
+                        mangabaka_id = int(selection)
+                        mangabaka_entry = await mangabaka_api.get_entry_by_id(mangabaka_id)
 
-                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
+                        if "id" not in mangabaka_entry:
+                            progress.print("Invalid id, try again.")
+                            continue
 
-                    if mangadotnet_id is None:
-                        response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
-                        mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
+                        progress.update(task, task="MangaDotNet Entry")
 
-                    if mangadotnet_id is None:
-                        print("Unable to create mangadot id...")
+                        mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
+
+                        if mangadotnet_id is None:
+                            response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
+                            mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
+
+                        if mangadotnet_id is None:
+                            progress.print("Unable to create mangadot id...")
+                            break
+
+                        data.update_manual_mapping(entry[0], mangabaka_id, mangadotnet_id)
+                        progress.print("Success")
                         break
-
-                    data.update_manual_mapping(entry[0], mangabaka_id, mangadotnet_id)
-                    break

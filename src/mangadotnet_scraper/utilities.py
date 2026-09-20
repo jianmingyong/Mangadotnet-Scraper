@@ -6,13 +6,15 @@ def clean_string(value: str) -> str:
     return value.replace("\u200f", "").strip("\r").strip("\n").strip()
 
 
-def safe_dict_get[T](obj: Mapping[str, Any], value_type: type[T], *keys: str) -> T | None:
+def safe_dict_get[T](
+    obj: Mapping[str, Any], *keys: str, type: type[T] = Any, default: T = None
+) -> T:
     try:
         result = obj
 
         for key in keys:
             result = result[key]
 
-        return cast(value_type, result)
+        return cast(type, result)
     except KeyError:
-        return None
+        return default
