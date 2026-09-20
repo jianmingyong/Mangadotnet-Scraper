@@ -444,6 +444,9 @@ async def upload_chapters(
                         pages_count = len(pages)
 
                         if len(pages) == 0:
+                            logging.getLogger().info(
+                                f"Fetch Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                            )
                             return
 
                         current_progress.update(task_id, total=pages_count, status="Downloading Image")
