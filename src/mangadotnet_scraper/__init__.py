@@ -35,7 +35,6 @@ from mangadotnet_scraper.modules import (
     ArtLapsaModule,
     BaseModule,
     EzMangaModule,
-    MangaPage,
     NyxScansModule,
     RitharScansModule,
 )
@@ -224,9 +223,9 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
         progress.add_task(module.display_name, total=None)
 
         try:
-            async for title, link in module.fetch_manga_listing():
-                progress.print("Adding:", title, markup=False, highlight=False)
-                data.add_module_listing(module.module_id, title, link)
+            async for listing in module.fetch_manga_listing():
+                progress.print("Adding:", listing.title, markup=False, highlight=False)
+                data.add_module_listing(module.module_id, listing.manga_id, listing.title, listing.link)
 
             progress.print(f"Done fetching {module.display_name} Listing")
         except ClientError:
@@ -243,7 +242,6 @@ async def fetch_module_listing_details(
     skip_mapping: bool = False,
 ) -> None:
     total_progress = Progress(
-        BarColumn(bar_width=None),
         TextColumn("Fetching {task.description} Details"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
@@ -251,7 +249,7 @@ async def fetch_module_listing_details(
 
     current_progress = Progress(SpinnerColumn(), TextColumn("Fetching: {task.description}"))
 
-    with Live(Group(total_progress, Rule(), current_progress), transient=True):
+    with Live(Group(Rule(), total_progress, Rule(), current_progress), transient=True):
         listing_count, listing = data.get_module_listing(module.module_id, only_old_entries)
         total_progress_task_id = total_progress.add_task(module.display_name, total=listing_count)
 
@@ -259,6 +257,7 @@ async def fetch_module_listing_details(
 
         async def fetch_manga_detail_task(
             rowid: int,
+            manga_id: str,
             link: str,
             title: str,
             mangabaka_id: int | None,
@@ -269,7 +268,7 @@ async def fetch_module_listing_details(
                 task_id = current_progress.add_task(title)
 
                 try:
-                    detail = await module.fetch_manga_detail(link)
+                    detail = await module.fetch_manga_detail(manga_id, link)
 
                     chapters: list[ModuleChapter] = []
 
@@ -278,10 +277,12 @@ async def fetch_module_listing_details(
                             ModuleChapter(
                                 chapter.language,
                                 chapter.group,
+                                chapter.type,
                                 chapter.chapter_number,
                                 chapter.volume_number,
-                                chapter.chapter_title,
+                                chapter.title,
                                 chapter.link,
+                                chapter.chapter_id,
                                 False,
                             )
                         )
@@ -367,7 +368,13 @@ async def fetch_module_listing_details(
                             for chapter in chapters:
                                 chapter.uploaded = is_chapter_uploaded(chapter, mangadotnet_chapters)
 
-                    module_manga = ModuleManga(detail.title, detail.alt_titles, mangabaka_id, mangadotnet_id, chapters)
+                    module_manga = ModuleManga(
+                        detail.title,
+                        detail.alt_titles,
+                        mangabaka_id,
+                        mangadotnet_id,
+                        chapters,
+                    )
 
                     data.add_module_manga(rowid, module_manga)
                 except ClientError as error:
@@ -381,9 +388,9 @@ async def fetch_module_listing_details(
                     total_progress.advance(total_progress_task_id)
 
         async with asyncio.TaskGroup() as group:
-            for rowid, link, title, mangabaka_id, mangadotnet_id, manual_override in listing:
+            for rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override in listing:
                 group.create_task(
-                    fetch_manga_detail_task(rowid, link, title, mangabaka_id, mangadotnet_id, manual_override)
+                    fetch_manga_detail_task(rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override)
                 )
 
         total_progress.print(f"Done fetching {module.display_name} Listing Details")
@@ -396,7 +403,6 @@ async def upload_chapters(
     mangadotnet_api: MangaDotNetApi,
 ):
     total_progress = Progress(
-        BarColumn(bar_width=None),
         TextColumn("Upload {task.description} Overall"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
@@ -415,12 +421,12 @@ async def upload_chapters(
 
     group_id_cache: dict[str, int] = {}
 
-    with Live(Group(total_progress, Rule(), current_progress_title, current_progress), transient=True):
+    with Live(Group(Rule(), total_progress, Rule(), current_progress_title, current_progress), transient=True):
         manga_count, manga = data.get_non_uploaded_manga(module.module_id)
         total_progress_task = total_progress.add_task(module.display_name, total=manga_count)
         current_progress_title_task = current_progress_title.add_task("", status="", count=0)
 
-        for rowid, link, title, mangadotnet_id in manga:
+        for rowid, manga_id, link, title, mangadotnet_id in manga:
             current_progress_title.update(current_progress_title_task, status=f"Uploading: {title}", count=0)
 
             chapters_count, chapters = data.get_non_uploaded_chapters(rowid)
@@ -428,8 +434,18 @@ async def upload_chapters(
             current_progress_title.update(current_progress_title_task, count=chapters_count)
 
             chapters = [
-                (manga_rowid, language, scanlator_group, chapter_number, volume_number, chapter_title, link)
-                for manga_rowid, language, scanlator_group, chapter_number, volume_number, chapter_title, link in chapters
+                (
+                    manga_rowid,
+                    language,
+                    scanlator_group,
+                    type,
+                    chapter_number,
+                    volume_number,
+                    chapter_title,
+                    link,
+                    chapter_id,
+                )
+                for manga_rowid, language, scanlator_group, type, chapter_number, volume_number, chapter_title, link, chapter_id in chapters
             ]
 
             upload_semaphore = Semaphore(module.upload_concurrency)
@@ -440,11 +456,14 @@ async def upload_chapters(
                 manga_rowid: int,
                 language: str,
                 scanlator_group: str,
-                chapter_number: float,
+                type: str,
+                chapter_number: float | None,
                 volume_number: float | None,
                 chapter_title: str,
                 chapter_link: str,
                 manga_link: str,
+                manga_id: str,
+                chapter_id: str,
             ) -> None:
                 async with upload_semaphore:
                     task_id = current_progress.add_task(
@@ -456,7 +475,7 @@ async def upload_chapters(
                     )
 
                     try:
-                        pages = await module.fetch_manga_pages(manga_link, chapter_link)
+                        pages = await module.fetch_manga_pages(manga_id, manga_link, chapter_id, chapter_link)
                         pages_count = len(pages)
 
                         if len(pages) == 0:
@@ -473,7 +492,7 @@ async def upload_chapters(
                         with ZipFile(zip_buffer, "a", ZIP_DEFLATED, compresslevel=9) as zip_file:
                             download_semaphore = Semaphore(module.download_concurrency)
 
-                            async def download_image_task(page: MangaPage) -> None:
+                            async def download_image_task(page) -> None:
                                 async with download_semaphore:
                                     image = await module.fetch_manga_image(page)
                                     zip_file.writestr(image.filename, image.data)
@@ -510,6 +529,9 @@ async def upload_chapters(
                         if group_id is None:
                             return
 
+                        if type != "chapter" and type != "volume":
+                            return
+
                         try:
                             location = await mangadotnet_api.prepare_upload(
                                 zip_file_size,
@@ -522,14 +544,16 @@ async def upload_chapters(
                                     [group_id],
                                     None,
                                     None,
-                                    "chapter",
+                                    type,
                                     None,
                                     None,
                                 ),
                             )
                         except ClientResponseError as error:
                             if error.code == 409:
-                                data.mark_chapter_uploaded(manga_rowid, language, scanlator_group, chapter_number)
+                                data.mark_chapter_uploaded(
+                                    manga_rowid, language, scanlator_group, type, chapter_number, volume_number
+                                )
                             return
 
                         def callable_progress(current):
@@ -555,7 +579,9 @@ async def upload_chapters(
                             if uploaded_mangas["success"]:
                                 for uploaded_manga in uploaded_mangas["uploads"]:
                                     if (
-                                        uploaded_manga["manga_id"] == mangadotnet_id
+                                        type == "chapter"
+                                        and chapter_number is not None
+                                        and uploaded_manga["manga_id"] == mangadotnet_id
                                         and uploaded_manga["language"] == language
                                         and uploaded_manga["chapter_number"] is not None
                                         and abs(uploaded_manga["chapter_number"] - chapter_number) < 0.1
@@ -585,7 +611,9 @@ async def upload_chapters(
                                 break
 
                         if found:
-                            data.mark_chapter_uploaded(manga_rowid, language, scanlator_group, chapter_number)
+                            data.mark_chapter_uploaded(
+                                manga_rowid, language, scanlator_group, type, chapter_number, volume_number
+                            )
                             logging.getLogger().info(
                                 f"Upload Success: [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
                             )
@@ -605,10 +633,12 @@ async def upload_chapters(
                     manga_rowid,
                     language,
                     scanlator_group,
+                    type,
                     chapter_number,
                     volume_number,
                     chapter_title,
                     chapter_link,
+                    chapter_id,
                 ) in chapters:
                     group.create_task(
                         upload_chapter_task(
@@ -617,11 +647,14 @@ async def upload_chapters(
                             manga_rowid,
                             language,
                             scanlator_group,
+                            type,
                             chapter_number,
                             volume_number,
                             chapter_title,
                             chapter_link,
                             link,
+                            manga_id,
+                            chapter_id,
                         )
                     )
 

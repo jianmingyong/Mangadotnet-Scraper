@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from asyncio import sleep
-from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from functools import wraps
 from typing import Final
 
@@ -59,26 +59,6 @@ def retryable_client_session[**P, R](
                     raise
 
         return await async_func(*args, **kwargs)
-
-    return wrapper
-
-
-def retryable_client_session_generator[**P, R](
-    async_func: Callable[P, AsyncGenerator[R]], max_retry: int = 5
-) -> Callable[P, AsyncGenerator[R]]:
-    @wraps(async_func)
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[R]:
-        for retry in range(max_retry):
-            try:
-                async for item in async_func(*args, **kwargs):
-                    yield item
-                return
-            except ClientConnectionError:
-                # Connect failed or disconnect from internet.
-                await sleep(2 * (retry + 1))
-
-        async for item in async_func(*args, **kwargs):
-            yield item
 
     return wrapper
 

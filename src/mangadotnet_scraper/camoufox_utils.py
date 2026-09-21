@@ -15,7 +15,7 @@ from playwright_captcha.utils.exceptions import (
 )
 
 
-def create_browser(headless: bool = True, **launch_options):
+def create_browser(headless: bool = True, **launch_options) -> AsyncCamoufox:
     os = sys.platform
 
     if os == "win32" or os == "cygwin":
