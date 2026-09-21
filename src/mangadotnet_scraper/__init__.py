@@ -673,13 +673,13 @@ async def manual_entry_matching(
         _count, module_listing = data.get_module_listing_non_mapped(module.module_id)
 
         unmapped_listing = [
-            (rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id)
-            for rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
+            (rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id)
+            for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
         ]
 
         choices = [
-            Choice(f"[{rowid}] {title}", rowid)
-            for rowid, link, title, alt_titles, mangabaka_id, mangadotnet_id in unmapped_listing
+            Choice(f"[{rowid}] {title} [+{len(str(alt_titles).splitlines())} Alt Titles]", rowid)
+            for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in unmapped_listing
         ]
 
         selection = await questionary.select(
@@ -695,11 +695,11 @@ async def manual_entry_matching(
         else:
             entry = next(filter(lambda x: x[0] == selection, unmapped_listing))
 
-            print(f"[{entry[0]}] {entry[2]}")
-            print("Link:", entry[1])
+            print(f"[{entry[0]}] {entry[3]}")
+            print("Link:", entry[2])
             print("Alt Titles:")
 
-            for item in str(entry[3]).splitlines():
+            for item in str(entry[4]).splitlines():
                 print(item)
 
             def check_for_int_or_skip(input: str) -> bool:

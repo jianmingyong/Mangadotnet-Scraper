@@ -121,7 +121,7 @@ class NyxScansModule(BaseModule):
             if number is None or chapter_slug is None or chapter_id is None:
                 continue
 
-            if chapter_title is None:
+            if chapter_title is None or chapter_title == "" or chapter_title == number:
                 chapter_title = f"Chapter {number:.1f}".rstrip("0").rstrip(".")
 
             chapters.append(
