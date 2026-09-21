@@ -628,35 +628,38 @@ async def upload_chapters(
                     finally:
                         current_progress.remove_task(task_id)
 
-            async with TaskGroup() as group:
-                for (
-                    manga_rowid,
-                    language,
-                    scanlator_group,
-                    type,
-                    chapter_number,
-                    volume_number,
-                    chapter_title,
-                    chapter_link,
-                    chapter_id,
-                ) in chapters:
-                    group.create_task(
-                        upload_chapter_task(
-                            upload_semaphore,
-                            mangadotnet_id,
-                            manga_rowid,
-                            language,
-                            scanlator_group,
-                            type,
-                            chapter_number,
-                            volume_number,
-                            chapter_title,
-                            chapter_link,
-                            link,
-                            manga_id,
-                            chapter_id,
+            try:
+                async with TaskGroup() as group:
+                    for (
+                        manga_rowid,
+                        language,
+                        scanlator_group,
+                        type,
+                        chapter_number,
+                        volume_number,
+                        chapter_title,
+                        chapter_link,
+                        chapter_id,
+                    ) in chapters:
+                        group.create_task(
+                            upload_chapter_task(
+                                upload_semaphore,
+                                mangadotnet_id,
+                                manga_rowid,
+                                language,
+                                scanlator_group,
+                                type,
+                                chapter_number,
+                                volume_number,
+                                chapter_title,
+                                chapter_link,
+                                link,
+                                manga_id,
+                                chapter_id,
+                            )
                         )
-                    )
+            except *ClientError as error:
+                logging.getLogger().error(error.message, exc_info=error)
 
             total_progress.advance(total_progress_task)
 
