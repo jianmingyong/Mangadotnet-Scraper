@@ -1,13 +1,10 @@
-import mimetypes
 from collections.abc import AsyncIterable, Collection
-from typing import Any, TypedDict, override
+from typing import TypedDict, override
 
 from aiohttp import ClientSession
-from aiohttp.typedefs import Query
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaImage, MangaListing, MangaPage
-from mangadotnet_scraper.network import create_client, retryable_client_session
+from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
 from mangadotnet_scraper.utilities import clean_string, safe_dict_get
 
 
@@ -18,27 +15,14 @@ class EzMangaModule(BaseModule):
     _session: ClientSession
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        super().__init__(config, "ez_manga", "Ezmanga")
-
-    @override
-    async def initialize(self) -> None:
-        self._session = create_client(
-            base_url=self._BASE_API_URL,
-            headers={
-                "Origin": self._BASE_URL,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
-            },
+        super().__init__(
+            config,
+            "ez_manga",
+            "Ezmanga",
+            self._BASE_URL,
+            self._BASE_API_URL,
+            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0"},
         )
-
-    @override
-    async def close(self) -> None:
-        await self._session.close()
-
-    @retryable_client_session
-    async def _get_json(self, url: str, params: Query = None) -> Any:
-        async with self._session.get(url, params=params) as response:
-            response.raise_for_status()
-            return await response.json()
 
     class MangaListingResponse(TypedDict):
         data: Collection[EzMangaModule.MangaListingResponseData]
@@ -57,7 +41,7 @@ class EzMangaModule(BaseModule):
     @override
     async def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         async def fetch_listing(page: int = 1) -> self.MangaListingResponse:
-            return await self._get_json(
+            return await self.get_json(
                 "/api/v1/series",
                 params={"page": page, "perPage": 100, "sort": "newest"},
             )
@@ -103,7 +87,7 @@ class EzMangaModule(BaseModule):
     async def fetch_manga_detail(self, manga_id: str, link: str) -> MangaDetail:
         slug_id = link[link.rindex("/") + 1 :]
 
-        detail_json: self.MangaDetailResponse = await self._get_json(f"/api/v1/series/{slug_id}")
+        detail_json: self.MangaDetailResponse = await self.get_json(f"/api/v1/series/{slug_id}")
 
         title = clean_string(safe_dict_get(detail_json, "title", type=str, default=""))
         alt_titles = clean_string(safe_dict_get(detail_json, "alternativeTitles", type=str, default=""))
@@ -111,7 +95,7 @@ class EzMangaModule(BaseModule):
         chapters = []
 
         async def get_chapters(cursor: str | None):
-            return await self._get_json(
+            return await self.get_json(
                 f"/api/v2/series/{slug_id}/chapters",
                 params={"limit": 100, "sort": "asc"}
                 if cursor is None
@@ -174,7 +158,7 @@ class EzMangaModule(BaseModule):
 
         manga_pages: list[MangaPage] = []
 
-        json: self.MangaPageResponse = await self._get_json(f"/api/v1/series/{manga_slug}/chapters/{chapter_slug}")
+        json: self.MangaPageResponse = await self.get_json(f"/api/v1/series/{manga_slug}/chapters/{chapter_slug}")
 
         for image in safe_dict_get(json, "images", type=Collection[self.MangaPageResponseImage], default=[]):
             order = safe_dict_get(image, "order", type=int)
@@ -186,14 +170,3 @@ class EzMangaModule(BaseModule):
             manga_pages.append(MangaPage(order, url, None))
 
         return manga_pages
-
-    @retryable_client_session
-    @override
-    async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        async with self._session.get(page.link) as response:
-            response.raise_for_status()
-
-            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
-            data = await response.read()
-
-            return MangaImage(filename, data)

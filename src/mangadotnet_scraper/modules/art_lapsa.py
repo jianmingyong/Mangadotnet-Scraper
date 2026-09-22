@@ -1,15 +1,15 @@
 import json
-import mimetypes
 import re
 from collections.abc import AsyncIterable
 from typing import cast, override
 
-from aiohttp import ClientSession
 from bs4 import BeautifulSoup, Tag
+from playwright.async_api import Browser, Error
 
+from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaImage, MangaListing, MangaPage
-from mangadotnet_scraper.network import create_client, retryable_client_session
+from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
+from mangadotnet_scraper.network import retryable_client_session
 from mangadotnet_scraper.utilities import clean_string, safe_dict_get
 
 
@@ -17,41 +17,40 @@ class ArtLapsaModule(BaseModule):
     _BASE_URL = "https://artlapsa.com"
     _BASE_CDN_URL = "https://cdn.artlapsa.com"
 
-    _session: ClientSession
-
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        super().__init__(config, "art_lapsa", "Art Lapsa")
-
-    @override
-    async def initialize(self) -> None:
-        self._session = create_client(base_url=self._BASE_URL, headers={"Origin": self._BASE_URL})
-
-    @override
-    async def close(self) -> None:
-        await self._session.close()
-
-    @retryable_client_session
-    async def get_html(self, url: str) -> str:
-        async with self._session.get(url) as response:
-            response.raise_for_status()
-            return await response.text("utf-8")
+        super().__init__(config, "art_lapsa", "Art Lapsa", self._BASE_URL)
 
     @override
     async def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        html = await self.get_html("/latest/")
-        soup = BeautifulSoup(html, "html.parser")
+        async with create_browser() as browser, await cast(Browser, browser).new_context() as context:
+            page = await context.new_page()
+            await page.goto(f"{self._BASE_URL}/latest", wait_until="domcontentloaded")
 
-        elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+            while True:
+                try:
+                    button = await page.wait_for_selector('button[wire\\:click="loadMore"]', state="attached")
 
-        for element in elements:
-            series_id = cast(str, element.attrs.get("href"))
-            title = cast(str, element.attrs.get("title"))
-            link = series_id
+                    if button is not None:
+                        await button.click()
+                    else:
+                        break
+                except Error:
+                    break
 
-            if title is None or link is None:
-                continue
+            html = await page.content()
+            soup = BeautifulSoup(html, "html.parser")
 
-            yield MangaListing(clean_string(series_id), clean_string(title), clean_string(link))
+            elements = soup.find_all("a", {"href": re.compile("/series/"), "class": "grid"})
+
+            for element in elements:
+                link = cast(str, element.attrs.get("href"))
+                title = cast(str, element.attrs.get("title"))
+                series_id = link[link.rfind("/") + 1 :]
+
+                if title is None or link is None:
+                    continue
+
+                yield MangaListing(clean_string(series_id), clean_string(title), clean_string(link))
 
     @override
     async def fetch_manga_detail(self, manga_id: str, link: str) -> MangaDetail:
@@ -148,7 +147,7 @@ class ArtLapsaModule(BaseModule):
 
             @retryable_client_session
             async def test_page_response(page_number: int, link: str) -> bool:
-                async with self._session.head(link) as test_response:
+                async with self.session.head(link) as test_response:
                     if test_response.ok:
                         pages.append(MangaPage(page_number, link, {}))
                         return True
@@ -193,14 +192,3 @@ class ArtLapsaModule(BaseModule):
                         )
 
         return pages
-
-    @retryable_client_session
-    @override
-    async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        async with self._session.get(page.link) as response:
-            response.raise_for_status()
-
-            filename = f"{page.page_number:03d}{mimetypes.guess_extension(response.content_type, False)}"
-            data = await response.read()
-
-            return MangaImage(filename, data)

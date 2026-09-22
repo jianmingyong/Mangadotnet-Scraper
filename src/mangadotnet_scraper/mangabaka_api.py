@@ -1,12 +1,13 @@
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable
 from contextlib import AbstractAsyncContextManager
 from types import TracebackType
-from typing import Final, Literal, ReadOnly, TypedDict
+from typing import Final, Literal, ReadOnly, TypedDict, cast
 
-from aiohttp import ClientSession
+from aiohttp import ClientResponse, ClientResponseError, ClientSession
 
 from mangadotnet_scraper.network import create_client, retryable_client_session
+from mangadotnet_scraper.utilities import safe_dict_get
 
 
 class MangaBakaError(TypedDict):
@@ -21,12 +22,12 @@ class MangaBakaEntry(TypedDict):
 
 class MangaBakaEntries(TypedDict):
     status: ReadOnly[Literal[200]]
-    data: Sequence[MangaBakaEntryData]
+    data: ReadOnly[Collection[MangaBakaEntryData]]
 
 
 class MangaBakaEntryData(TypedDict):
     id: ReadOnly[int]
-    titles: Sequence[MangaBakaEntryDataTitle]
+    titles: ReadOnly[Collection[MangaBakaEntryDataTitle]]
 
 
 class MangaBakaEntryDataTitle(TypedDict):
@@ -39,7 +40,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
     _session: Final[ClientSession]
 
     def __init__(self) -> None:
-        self._session = create_client(f"{self._BASE_API_URL}", headers={"Origin": self._BASE_API_URL})
+        self._session = create_client(self._BASE_API_URL, headers={"Origin": self._BASE_API_URL})
 
     async def __aexit__(
         self,
@@ -52,11 +53,31 @@ class MangaBakaApi(AbstractAsyncContextManager):
     async def close(self) -> None:
         await self._session.close()
 
+    async def _raise_for_status(self, response: ClientResponse) -> None:
+        if not response.ok:
+            assert response.reason is not None
+
+            message = response.reason
+
+            if response.content_type == "application/json":
+                json = await response.json()
+                error_message = safe_dict_get(json, "message", type=str)
+                if error_message is not None:
+                    message = error_message
+
+            raise ClientResponseError(
+                response.request_info,
+                response.history,
+                status=response.status,
+                message=message,
+                headers=response.headers,
+            )
+
     @retryable_client_session
-    async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData | MangaBakaError:
+    async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData:
         async with self._session.get(f"/v2/series/{ids}") as response:
-            json: MangaBakaEntry | MangaBakaError = await response.json(encoding="utf-8")
-            return json if json["status"] != 200 else json["data"]
+            await self._raise_for_status(response)
+            return cast(MangaBakaEntryData, safe_dict_get(await response.json(), "data", default={}))
 
     async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaBakaEntryData | None:
         if isinstance(titles, str):
@@ -73,12 +94,17 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     "type_not": "novel",
                 },
             ) as response:
-                json: MangaBakaEntries | MangaBakaError = await response.json(encoding="utf-8")
+                await self._raise_for_status(response)
 
-                if json["status"] != 200:
-                    return
+                json: MangaBakaEntries = await response.json()
 
-                matches.extend(json["data"])
+                for data in safe_dict_get(json, "data", type=Collection[MangaBakaEntryData], default=[]):
+                    for inner_title in safe_dict_get(
+                        data, "titles", type=Collection[MangaBakaEntryDataTitle], default=[]
+                    ):
+                        if title == inner_title:
+                            matches.append(data)
+                            break
 
         for title in titles:
             await do_exact_match(title)
@@ -92,12 +118,17 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     "type_not": "novel",
                 },
             ) as response:
-                json: MangaBakaEntries | MangaBakaError = await response.json(encoding="utf-8")
+                await self._raise_for_status(response)
 
-                if json["status"] != 200:
-                    return
+                json: MangaBakaEntries = await response.json()
 
-                matches.extend(json["data"])
+                for data in safe_dict_get(json, "data", type=Collection[MangaBakaEntryData], default=[]):
+                    for inner_title in safe_dict_get(
+                        data, "titles", type=Collection[MangaBakaEntryDataTitle], default=[]
+                    ):
+                        if title == inner_title:
+                            matches.append(data)
+                            break
 
         if len(matches) == 0:
             for title in titles:

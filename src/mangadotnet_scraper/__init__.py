@@ -725,10 +725,11 @@ async def manual_entry_matching(
                         task = progress.add_task("", total=None, task="MangaBaka Entry")
 
                         mangabaka_id = int(selection)
-                        mangabaka_entry = await mangabaka_api.get_entry_by_id(mangabaka_id)
 
-                        if "id" not in mangabaka_entry:
-                            progress.print("Invalid id, try again.")
+                        try:
+                            await mangabaka_api.get_entry_by_id(mangabaka_id)
+                        except ClientResponseError as error:
+                            progress.print(error.message, markup=False)
                             continue
 
                         progress.update(task, task="MangaDotNet Entry")
