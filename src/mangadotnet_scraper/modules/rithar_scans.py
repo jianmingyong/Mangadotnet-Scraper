@@ -3,7 +3,6 @@ import re
 from collections.abc import AsyncIterable
 from typing import cast, override
 
-from aiohttp import ClientSession
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Browser, Error
 
@@ -17,8 +16,6 @@ from mangadotnet_scraper.utilities import clean_string, safe_dict_get
 class RitharScansModule(BaseModule):
     _BASE_URL = "https://ritharscans.com"
     _BASE_CDN_URL = "https://cdn.ritharscans.com"
-
-    _session: ClientSession
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(config, "rithar_scans", "Rithar Scans", self._BASE_URL)
@@ -150,7 +147,7 @@ class RitharScansModule(BaseModule):
 
             @retryable_client_session
             async def test_page_response(page_number: int, link: str) -> bool:
-                async with self._session.head(link) as test_response:
+                async with self.session.head(link) as test_response:
                     if test_response.ok:
                         pages.append(MangaPage(page_number, link, {}))
                         return True

@@ -1,8 +1,6 @@
 from collections.abc import AsyncIterable, Collection
 from typing import TypedDict, override
 
-from aiohttp import ClientSession
-
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
 from mangadotnet_scraper.utilities import clean_string, safe_dict_get
@@ -11,8 +9,6 @@ from mangadotnet_scraper.utilities import clean_string, safe_dict_get
 class EzMangaModule(BaseModule):
     _BASE_URL = "https://ezmanga.org"
     _BASE_API_URL = "https://vapi.ezmanga.org"
-
-    _session: ClientSession
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(

@@ -247,7 +247,7 @@ async def fetch_module_listing_details(
         MofNCompleteColumn(),
     )
 
-    current_progress = Progress(SpinnerColumn(), TextColumn("Fetching: {task.description}"))
+    current_progress = Progress(SpinnerColumn(), TextColumn("Fetching: {task.description}", markup=False))
 
     with Live(Group(Rule(), total_progress, Rule(), current_progress), transient=True):
         listing_count, listing = data.get_module_listing(module.module_id, only_old_entries)
@@ -658,7 +658,7 @@ async def upload_chapters(
                                 chapter_id,
                             )
                         )
-            except *ClientError as error:
+            except *Exception as error:
                 logging.getLogger().error(error.message, exc_info=error)
 
             total_progress.advance(total_progress_task)
