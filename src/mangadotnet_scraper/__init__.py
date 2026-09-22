@@ -53,6 +53,12 @@ def initialize() -> None:
         asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
+    except ExceptionGroup as error:
+        print(error)
+        logging.getLogger().exception("Unhandled exception caught:", exc_info=error)
+    except Exception as error:
+        print(error)
+        logging.getLogger().exception("Unhandled exception caught:", exc_info=error)
 
 
 async def initialize_async() -> None:
@@ -659,7 +665,7 @@ async def upload_chapters(
                             )
                         )
             except *Exception as error:
-                logging.getLogger().error(error.message, exc_info=error)
+                logging.getLogger().exception(error.message, exc_info=error)
 
             total_progress.advance(total_progress_task)
 
