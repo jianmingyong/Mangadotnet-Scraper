@@ -3,7 +3,7 @@ from typing import TypedDict, override
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
-from mangadotnet_scraper.utilities import clean_string, safe_dict_get
+from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
 class NyxScansModule(BaseModule):
@@ -40,17 +40,17 @@ class NyxScansModule(BaseModule):
         while has_next_page:
             json = await fetch_listing(page)
 
-            for post in safe_dict_get(json, "posts", type=Collection[self.PostsResponsePost], default=[]):
-                id = safe_dict_get(post, "id", type=int)
-                title = safe_dict_get(post, "postTitle", type=str)
-                slug = safe_dict_get(post, "slug", type=str)
+            for post in dict_get_recursive(json, "posts", default=[]):
+                id: int | None = dict_get_recursive(post, "id")
+                title: str | None = dict_get_recursive(post, "postTitle")
+                slug: str | None = dict_get_recursive(post, "slug")
 
                 if id is None or title is None or slug is None:
                     continue
 
                 yield MangaListing(str(id), clean_string(title), f"{self._BASE_URL}/series/{clean_string(slug)}")
 
-            has_next_page = page * 100 < safe_dict_get(json, "totalCount", type=int, default=0)
+            has_next_page = page * 100 < dict_get_recursive(json, "totalCount", default=0)
             page += 1
 
     class PostResponse(TypedDict):
@@ -78,22 +78,20 @@ class NyxScansModule(BaseModule):
         slug = link[link.rfind("/") + 1 :]
         json: self.PostResponse = await self.get_json("/api/post", params={"postId": manga_id})
 
-        title = safe_dict_get(json, "post", "postTitle", type=str, default="")
-        alt_titles = safe_dict_get(json, "post", "alternativeTitles", type=str, default="").splitlines()
+        title = dict_get_recursive(json, "post", "postTitle", default="")
+        alt_titles = dict_get_recursive(json, "post", "alternativeTitles", default="").splitlines()
 
         chapters = []
         chapters_json: self.ChaptersResponse = await self.get_json("/api/chapters", params={"postId": manga_id})
 
-        for chapter in safe_dict_get(
-            chapters_json, "post", "chapters", type=Collection[self.ChaptersResponsePostChapter], default=[]
-        ):
-            if safe_dict_get(chapter, "isLocked", type=bool, default=False):
+        for chapter in dict_get_recursive(chapters_json, "post", "chapters", default=[]):
+            if dict_get_recursive(chapter, "isLocked", default=False):
                 continue
 
-            chapter_title = safe_dict_get(chapter, "title", type=str)
-            number = safe_dict_get(chapter, "number", type=float)
-            chapter_slug = safe_dict_get(chapter, "slug", type=str)
-            chapter_id = safe_dict_get(chapter, "id", type=int)
+            chapter_title: str | None = dict_get_recursive(chapter, "title")
+            number: float | None = dict_get_recursive(chapter, "number")
+            chapter_slug: str | None = dict_get_recursive(chapter, "slug")
+            chapter_id: int | None = dict_get_recursive(chapter, "id")
 
             if number is None or chapter_slug is None or chapter_id is None:
                 continue
@@ -136,11 +134,9 @@ class NyxScansModule(BaseModule):
         manga_pages = []
         pages: self.ChapterResponse = await self.get_json("/api/chapter", params={"chapterId": chapter_id})
 
-        for page in safe_dict_get(
-            pages, "chapter", "images", type=Collection[self.ChapterResponseObjectImages], default=[]
-        ):
-            order = safe_dict_get(page, "order", type=int)
-            url = safe_dict_get(page, "url", type=str)
+        for page in dict_get_recursive(pages, "chapter", "images", default=[]):
+            order: int | None = dict_get_recursive(page, "order")
+            url: str | None = dict_get_recursive(page, "url")
 
             if order is None or url is None:
                 continue

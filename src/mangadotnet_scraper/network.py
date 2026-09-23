@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from asyncio import sleep
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Iterable
 from functools import wraps
 from typing import Final
 
@@ -20,7 +20,7 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 
 
 def create_client(
-    base_url: str | None = None, additional_middlewares: Sequence[ClientMiddlewareType] = [], **kwargs
+    base_url: str | None = None, additional_middlewares: Iterable[ClientMiddlewareType] = [], **kwargs
 ) -> ClientSession:
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver)

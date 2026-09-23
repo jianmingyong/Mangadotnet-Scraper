@@ -10,7 +10,7 @@ from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
 from mangadotnet_scraper.network import retryable_client_session
-from mangadotnet_scraper.utilities import clean_string, safe_dict_get
+from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
 class ArtLapsaModule(BaseModule):
@@ -139,7 +139,7 @@ class ArtLapsaModule(BaseModule):
             except json.decoder.JSONDecodeError:
                 return []
 
-            revision_id = safe_dict_get(revision_json, "image", "url", type=str)
+            revision_id: str | None = dict_get_recursive(revision_json, "image", "url")
 
             if revision_id is not None:
                 revision_id = revision_id[: revision_id.rfind("/")]

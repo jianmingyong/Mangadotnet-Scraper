@@ -34,7 +34,7 @@ class MangaDotNetScraperConfig:
         "upload_verify_duration": 60,
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._data: MangaDotNetScraperConfig.Data = self._DEFAULT_CONFIG
 
     def _return_or_default[T](self, value: T | None, default: T) -> T:
@@ -84,13 +84,13 @@ class MangaDotNetScraperConfig:
     def upload_verify_duration(self) -> int:
         return self._return_or_default(self._data.get("upload_verify_duration"), 60)
 
-    def load_config(self):
+    def load_config(self) -> None:
         try:
             with open(self._CONFIG_FILE_PATH, "rt+") as f:
                 self._data = json.load(f)
         except FileNotFoundError:
             self._data = self._DEFAULT_CONFIG
 
-    def save_config(self):
+    def save_config(self) -> None:
         with open(self._CONFIG_FILE_PATH, "wt+") as f:
             json.dump(self._data, f, indent=4)

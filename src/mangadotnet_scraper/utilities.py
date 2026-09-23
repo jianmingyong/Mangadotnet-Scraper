@@ -1,20 +1,18 @@
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 
 def clean_string(value: str) -> str:
     return value.replace("\u200f", "").strip("\r").strip("\n").strip()
 
 
-def safe_dict_get[T](
-    obj: Mapping[str, Any], *keys: str, type: type[T] = Any, default: T = None
-) -> T:
+def dict_get_recursive(obj: Mapping[str, Any], *keys: str, default: Any = None) -> Any:
     try:
         result = obj
 
         for key in keys:
             result = result[key]
 
-        return cast(type, result)
+        return result
     except KeyError:
         return default
