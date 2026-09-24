@@ -566,6 +566,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 for scanlator_group, scanlator_group_group in groupby(language_group, lambda x: x.scanlator_group):
                     for type, type_group in groupby(scanlator_group_group, lambda x: x.type):
                         if type == "chapter":
+                            chapter_list = [chapter.chapter_number for chapter in type_group]
                             self._connection.execute(
                                 f"""
                                 DELETE FROM module_chapter
@@ -574,17 +575,12 @@ class MangaDotNetScraperData(AbstractContextManager):
                                     language = ? AND
                                     scanlator_group = ? AND
                                     type = ? AND
-                                    chapter_number NOT IN ({",".join(["?" for _ in type_group])})
+                                    chapter_number NOT IN ({",".join("?" for _ in chapter_list)});
                                 """,
-                                (
-                                    rowid,
-                                    language,
-                                    scanlator_group,
-                                    type,
-                                    *[chapter.chapter_number for chapter in type_group],
-                                ),
+                                [rowid, language, scanlator_group, type, *chapter_list],
                             )
                         elif type == "volume":
+                            volume_list = [chapter.volume_number for chapter in type_group]
                             self._connection.execute(
                                 f"""
                                 DELETE FROM module_chapter
@@ -593,15 +589,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                                     language = ? AND
                                     scanlator_group = ? AND
                                     type = ? AND
-                                    volume_number NOT IN ({",".join(["?" for _ in type_group])})
+                                    volume_number NOT IN ({",".join("?" for _ in volume_list)});
                                 """,
-                                (
-                                    rowid,
-                                    language,
-                                    scanlator_group,
-                                    type,
-                                    *[chapter.volume_number for chapter in type_group],
-                                ),
+                                [rowid, language, scanlator_group, type, *volume_list],
                             )
 
     def remove_module_manga(self, rowid: int) -> None:
