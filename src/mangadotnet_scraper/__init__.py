@@ -53,9 +53,6 @@ def initialize() -> None:
         asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
-    except ExceptionGroup as error:
-        print(error)
-        logging.getLogger().exception("Unhandled exception caught:", exc_info=error)
     except Exception as error:
         print(error)
         logging.getLogger().exception("Unhandled exception caught:", exc_info=error)
@@ -95,6 +92,9 @@ async def initialize_async() -> None:
                     ],
                 ).ask_async()
 
+                if selection is None:
+                    break
+
                 if selection == 1:
                     selection = await questionary.select(
                         "Which Module(s) to Fetch Listing",
@@ -104,6 +104,9 @@ async def initialize_async() -> None:
                             Choice("Back", -2),
                         ],
                     ).ask_async()
+
+                    if selection is None:
+                        continue
 
                     if selection == -1:
                         for module in modules:
@@ -123,6 +126,9 @@ async def initialize_async() -> None:
                             Choice("Back", -2),
                         ],
                     ).ask_async()
+
+                    if selection is None:
+                        continue
 
                     if selection == -1:
                         async with MangaBakaApi() as mangabaka_api, MangaDotNetApi(config) as mangadotnet_api:
@@ -151,6 +157,9 @@ async def initialize_async() -> None:
                             Choice("Back", -2),
                         ],
                     ).ask_async()
+
+                    if selection is None:
+                        continue
 
                     if selection == -1:
                         async with MangaBakaApi() as mangabaka_api, MangaDotNetApi(config) as mangadotnet_api:
@@ -190,6 +199,9 @@ async def initialize_async() -> None:
                         ],
                     ).ask_async()
 
+                    if selection is None:
+                        continue
+
                     if selection == -1:
                         async with MangaDotNetApi(config) as mangadotnet_api:
                             for module in modules:
@@ -208,6 +220,9 @@ async def initialize_async() -> None:
                             Choice("Back", -1),
                         ],
                     ).ask_async()
+
+                    if selection is None:
+                        continue
 
                     if 0 <= selection < len(modules):
                         async with (
@@ -230,7 +245,7 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
 
         try:
             async for listing in module.fetch_manga_listing():
-                progress.print("Adding:", listing.title, markup=False, highlight=False)
+                progress.print("Adding:", listing.title, markup=False)
                 data.add_module_listing(module.module_id, listing.manga_id, listing.title, listing.link)
 
             progress.print(f"Done fetching {module.display_name} Listing")
@@ -318,12 +333,6 @@ async def fetch_module_listing_details(
                                         )
                                 else:
                                     pass
-                                    # This is too slow or often not working... need to optimize this before using again.
-                                    # mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                    #    [detail.title, *detail.alt_titles]
-                                    # )
-                                    # if mangadotnet_entry is not None:
-                                    #    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
                         else:
                             mangabaka_entry = await mangabaka_api.get_entry_by_title([detail.title, *detail.alt_titles])
 
@@ -342,12 +351,6 @@ async def fetch_module_listing_details(
                                     mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
                             else:
                                 pass
-                                # This is too slow or often not working... need to optimize this before using again.
-                                # mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                #    [detail.title, *detail.alt_titles]
-                                # )
-                                # if mangadotnet_entry is not None:
-                                #    mangadotnet_id = mangadotnet_entry["mangaData"]["manga"]["id"]
 
                     def is_chapter_uploaded(chapter: ModuleChapter, mangadotnet_chapters: list[Any]) -> bool:
                         for mangadotnet_chapter in mangadotnet_chapters:
@@ -359,11 +362,7 @@ async def fetch_module_listing_details(
                                     groups = mangadotnet_chapter.get("groups", [])
 
                                     for group in groups:
-                                        if (
-                                            isinstance(group, dict)
-                                            and "name" in group
-                                            and chapter.scanlator_group == group["name"]
-                                        ):
+                                        if isinstance(group, dict) and chapter.scanlator_group == group.get("name"):
                                             return True
 
                         return False
@@ -664,7 +663,7 @@ async def upload_chapters(
                                 chapter_id,
                             )
                         )
-            except *Exception as error:
+            except* Exception as error:
                 logging.getLogger().exception(error.message, exc_info=error)
 
             total_progress.advance(total_progress_task)
