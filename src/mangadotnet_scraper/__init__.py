@@ -712,7 +712,7 @@ async def manual_entry_matching(
                 print(item)
 
             def check_for_int_or_skip(input: str) -> bool:
-                return input.lower().strip() == "skip" or input.isdigit()
+                return input.lower().strip() == "skip" or input.lower().strip() == "s" or input.isdigit()
 
             while True:
                 selection: str = await questionary.text(
@@ -720,7 +720,10 @@ async def manual_entry_matching(
                     validate=check_for_int_or_skip,
                 ).ask_async()
 
-                if selection == "skip":
+                if selection is None:
+                    break
+
+                if selection == "skip" or selection == "s":
                     break
                 else:
                     with Progress(

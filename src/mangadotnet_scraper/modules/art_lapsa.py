@@ -60,7 +60,7 @@ class ArtLapsaModule(BaseModule):
         title_element = soup.find("h1")
         title = clean_string(title_element.text) if title_element else ""
 
-        alt_titles_element = soup.find_all("span", attrs={"class": "select-all"})
+        alt_titles_element = soup.find_all("li", attrs={"class": "select-all"})
         alt_titles = [clean_string(e.text) for e in alt_titles_element]
 
         def is_chapter_link_element(tag: Tag) -> bool:
@@ -76,10 +76,11 @@ class ArtLapsaModule(BaseModule):
 
         for chapter_element in chapter_elements:
             chapter_title = chapter_element.attrs.get("title")
-            if not chapter_title or not isinstance(chapter_title, str):
+            
+            if chapter_title is None:
                 continue
 
-            title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(chapter_title)
+            title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(cast(str, chapter_title))
 
             if title_match:
                 chapter_number = float(title_match[1])

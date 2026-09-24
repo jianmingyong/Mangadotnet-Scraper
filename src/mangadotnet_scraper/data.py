@@ -329,7 +329,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 t"""
                 SELECT COUNT(*)
                 FROM module_manga
-                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= unixepoch('now', '-12 hours'));
+                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'));
                 """
             )
 
@@ -337,7 +337,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 t"""
                 SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                 FROM module_manga
-                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= unixepoch('now', '-12 hours'))
+                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
                 ORDER BY title ASC;
                 """
             )
@@ -398,7 +398,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                     alt_titles = {"\n".join(manga.alt_titles)},
                     mangabaka_id = {manga.mangabaka_id},
                     mangadotnet_id = {manga.mangadotnet_id},
-                    last_checked = unixepoch('now')
+                    last_checked = strftime('%s', 'now')
                 WHERE rowid = {rowid};
                 """
             )
