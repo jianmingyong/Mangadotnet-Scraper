@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
-from asyncio import sleep
+from abc import ABC
+from asyncio import Lock, sleep
 from collections.abc import Callable, Coroutine, Iterable
 from functools import wraps
 from typing import Final
@@ -64,7 +64,6 @@ def retryable_client_session[**P, R](
 
 
 class Middleware(ABC):
-    @abstractmethod
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         return await handler(request)
 
@@ -106,10 +105,12 @@ class CloudflareMiddleware(Middleware):
 
     _user_agent: str | None
     _cookies: dict[str, str]
+    _lock: Lock
 
     def __init__(self) -> None:
         self._user_agent = None
         self._cookies = {}
+        self._lock = Lock()
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         async def update_and_request() -> ClientResponse:
@@ -123,14 +124,15 @@ class CloudflareMiddleware(Middleware):
 
             return await handler(request)
 
-        response = await update_and_request()
+        async with self._lock:
+            response = await update_and_request()
 
-        if response.headers.get("cf-mitigated") == "challenge":
-            data = await get_cloudflare_cookies(str(request.url))
+            if response.headers.get("cf-mitigated") == "challenge":
+                data = await get_cloudflare_cookies(str(request.url))
 
-            if data is not None:
-                self._user_agent = data[0]
-                self._cookies.update({request.host: data[1]})
-                return await update_and_request()
+                if data is not None:
+                    self._user_agent = data[0]
+                    self._cookies.update({request.host: data[1]})
+                    return await update_and_request()
 
-        return response
+            return response

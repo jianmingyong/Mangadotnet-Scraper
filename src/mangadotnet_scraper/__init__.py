@@ -245,12 +245,13 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
 
         try:
             async for listing in module.fetch_manga_listing():
-                progress.print("Adding:", listing.title, markup=False)
+                progress.print("Adding:", listing.title, markup=False, highlight=False)
                 data.add_module_listing(module.module_id, listing.manga_id, listing.title, listing.link)
 
             progress.print(f"Done fetching {module.display_name} Listing")
-        except ClientError:
+        except Exception as error:
             progress.print(f"Error fetching {module.display_name} Listing")
+            logging.getLogger().error(f"Error fetching {module.display_name} Listing", exc_info=error)
 
 
 async def fetch_module_listing_details(
@@ -392,13 +393,19 @@ async def fetch_module_listing_details(
                     current_progress.remove_task(task_id)
                     total_progress.advance(total_progress_task_id)
 
-        async with asyncio.TaskGroup() as group:
-            for rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override in listing:
-                group.create_task(
-                    fetch_manga_detail_task(rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override)
-                )
+        try:
+            async with asyncio.TaskGroup() as group:
+                for rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override in listing:
+                    group.create_task(
+                        fetch_manga_detail_task(
+                            rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
+                        )
+                    )
 
-        total_progress.print(f"Done fetching {module.display_name} Listing Details")
+            total_progress.print(f"Done fetching {module.display_name} Listing Details")
+        except* Exception as error:
+            total_progress.print(f"Error fetching {module.display_name} Listing Details")
+            logging.getLogger().error(f"Error fetching {module.display_name} Listing Details", exc_info=error)
 
 
 async def upload_chapters(

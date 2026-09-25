@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from itertools import groupby
@@ -234,6 +235,14 @@ class MangaDotNetScraperData(AbstractContextManager):
                     """
                 )
 
+            if table_version.get("module_manga", 1) < 6:
+                connection.executescript(
+                    """
+                    ALTER TABLE module_manga ADD COLUMN half_chapters INTEGER NOT NULL DEFAULT 0;
+                    UPDATE db_version SET version = 6 WHERE table_name = "module_manga";
+                    """
+                )
+
             if table_version.get("module_chapter", 1) < 2:
                 connection.executescript(
                     """
@@ -382,14 +391,20 @@ class MangaDotNetScraperData(AbstractContextManager):
 
     def _execute(self, sql: Template) -> Cursor:
         query = ""
+        values = []
 
         for t_string in sql:
             if isinstance(t_string, Interpolation):
-                query += "?"
+                if isinstance(t_string.value, Collection) and not isinstance(t_string.value, str):
+                    query += ",".join("?" for _ in range(len(t_string.value)))
+                    values.extend(t_string.value)
+                else:
+                    query += "?"
+                    values.append(t_string.value)
             else:
                 query += t_string
 
-        return self._connection.execute(query, sql.values)
+        return self._connection.execute(query, values)
 
     def add_module_listing(self, module_id: str, manga_id: str, title: str, link: str) -> None:
         with self._connection:
@@ -567,31 +582,29 @@ class MangaDotNetScraperData(AbstractContextManager):
                     for type, type_group in groupby(scanlator_group_group, lambda x: x.type):
                         if type == "chapter":
                             chapter_list = [chapter.chapter_number for chapter in type_group]
-                            self._connection.execute(
-                                f"""
+                            self._execute(
+                                t"""
                                 DELETE FROM module_chapter
                                 WHERE
-                                    manga_rowid = ? AND
-                                    language = ? AND
-                                    scanlator_group = ? AND
-                                    type = ? AND
-                                    chapter_number NOT IN ({",".join("?" for _ in chapter_list)});
-                                """,
-                                [rowid, language, scanlator_group, type, *chapter_list],
+                                    manga_rowid = {rowid} AND
+                                    language = {language} AND
+                                    scanlator_group = {scanlator_group} AND
+                                    type = {type} AND
+                                    chapter_number NOT IN ({chapter_list});
+                                """
                             )
                         elif type == "volume":
                             volume_list = [chapter.volume_number for chapter in type_group]
-                            self._connection.execute(
-                                f"""
+                            self._execute(
+                                t"""
                                 DELETE FROM module_chapter
                                 WHERE
-                                    manga_rowid = ? AND
-                                    language = ? AND
-                                    scanlator_group = ? AND
-                                    type = ? AND
-                                    volume_number NOT IN ({",".join("?" for _ in volume_list)});
-                                """,
-                                [rowid, language, scanlator_group, type, *volume_list],
+                                    manga_rowid = {rowid} AND
+                                    language = {language} AND
+                                    scanlator_group = {scanlator_group} AND
+                                    type = {type} AND
+                                    volume_number NOT IN ({volume_list});
+                                """
                             )
 
     def remove_module_manga(self, rowid: int) -> None:

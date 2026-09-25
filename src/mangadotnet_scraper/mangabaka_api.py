@@ -96,7 +96,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
             ) as response:
                 await self._raise_for_status(response)
 
-                json: MangaBakaEntries = await response.json()
+                json: MangaBakaEntries = await response.json(encoding="utf-8")
 
                 for data in dict_get_recursive(json, "data", default=[]):
                     for inner_title in dict_get_recursive(data, "titles", default=[]):
@@ -118,7 +118,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
             ) as response:
                 await self._raise_for_status(response)
 
-                json: MangaBakaEntries = await response.json()
+                json: MangaBakaEntries = await response.json(encoding="utf-8")
 
                 for data in dict_get_recursive(json, "data", default=[]):
                     for inner_title in dict_get_recursive(data, "titles", default=[]):

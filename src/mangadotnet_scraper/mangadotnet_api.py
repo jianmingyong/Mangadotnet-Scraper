@@ -385,6 +385,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     json = await response.json()
                     return dict_get_recursive(json, "duplicate", "id")
                 else:
+                    await self._raise_for_status(response)
                     return None
 
     @retryable_client_session
