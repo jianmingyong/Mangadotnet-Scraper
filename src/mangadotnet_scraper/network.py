@@ -132,7 +132,9 @@ class CloudflareMiddleware(Middleware):
                     return await update_and_request()
 
                 self._user_agent = None
-                del self._cookies[request.host]
+
+                if request.host in self._cookies:
+                    del self._cookies[request.host]
 
                 data = await get_cloudflare_cookies(str(request.url))
 
