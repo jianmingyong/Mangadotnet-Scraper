@@ -4,7 +4,6 @@ from asyncio import Semaphore, sleep
 from asyncio.taskgroups import TaskGroup
 from io import BytesIO
 from time import monotonic
-from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import questionary
@@ -38,6 +37,7 @@ from mangadotnet_scraper.modules import (
     NyxScansModule,
     RitharScansModule,
 )
+from mangadotnet_scraper.utilities import dict_get_recursive
 
 
 def initialize() -> None:
@@ -53,9 +53,8 @@ def initialize() -> None:
         asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
-    except Exception as error:
-        print(error)
-        logging.getLogger().exception("Unhandled exception caught:", exc_info=error)
+    except Exception:
+        logging.getLogger().exception("Unhandled exception caught")
 
 
 async def initialize_async() -> None:
@@ -249,9 +248,9 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
                 data.add_module_listing(module.module_id, listing.manga_id, listing.title, listing.link)
 
             progress.print(f"Done fetching {module.display_name} Listing")
-        except Exception as error:
+        except Exception:  # noqa: BLE001
             progress.print(f"Error fetching {module.display_name} Listing")
-            logging.getLogger().error(f"Error fetching {module.display_name} Listing", exc_info=error)
+            logging.getLogger().error(f"Error fetching {module.display_name} Listing")
 
 
 async def fetch_module_listing_details(
@@ -310,69 +309,69 @@ async def fetch_module_listing_details(
                         )
 
                     if not manual_override and not skip_mapping:
-                        if map_only_null:
-                            if mangabaka_id is None:
-                                mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                                    [detail.title, *detail.alt_titles]
-                                )
-
-                                if (
-                                    mangabaka_entry is not None
-                                    and "id" in mangabaka_entry
-                                    and isinstance(mangabaka_entry["id"], int)
-                                ):
-                                    mangabaka_id = mangabaka_entry["id"]
-
-                            if mangadotnet_id is None:
-                                if mangabaka_id is not None:
-                                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
-
-                                    if mangadotnet_id is None:
-                                        response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
-                                        mangadotnet_id = (
-                                            response["manga"]["id"] if response["success"] == True else None
-                                        )
-                                else:
-                                    pass
-                        else:
+                        if mangabaka_id is None or not map_only_null:
                             mangabaka_entry = await mangabaka_api.get_entry_by_title([detail.title, *detail.alt_titles])
 
-                            if (
-                                mangabaka_entry is not None
-                                and "id" in mangabaka_entry
-                                and isinstance(mangabaka_entry["id"], int)
-                            ):
-                                mangabaka_id = mangabaka_entry["id"]
+                            if mangabaka_entry is not None:
+                                mangabaka_id = dict_get_recursive(mangabaka_entry, "id")
 
+                        if mangadotnet_id is None or not map_only_null:
                             if mangabaka_id is not None:
                                 mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(mangabaka_id)
 
                                 if mangadotnet_id is None:
                                     response = await mangadotnet_api.create_from_mangabaka(mangabaka_id)
-                                    mangadotnet_id = response["manga"]["id"] if response["success"] == True else None
+                                    mangadotnet_id = dict_get_recursive(response, "manga", "id")
                             else:
-                                pass
+                                mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                    [detail.title, *detail.alt_titles]
+                                )
 
-                    def is_chapter_uploaded(chapter: ModuleChapter, mangadotnet_chapters: list[Any]) -> bool:
-                        for mangadotnet_chapter in mangadotnet_chapters:
-                            if isinstance(mangadotnet_chapter, dict):
-                                language = mangadotnet_chapter.get("language")
-                                chapter_number = mangadotnet_chapter.get("chapter_number")
+                                if mangadotnet_entry is not None:
+                                    mangadotnet_id = dict_get_recursive(mangadotnet_entry, "manga", "id")
 
-                                if chapter.language == language and chapter.chapter_number == chapter_number:
-                                    groups = mangadotnet_chapter.get("groups", [])
+                    async def is_chapter_uploaded(chapter: ModuleChapter) -> bool:
+                        if mangadotnet_id is None:
+                            return False
 
-                                    for group in groups:
-                                        if isinstance(group, dict) and chapter.scanlator_group == group.get("name"):
+                        if chapter.type == "chapter":
+                            mangadotnet_chapters = await mangadotnet_api.get_chapters_by_id(mangadotnet_id)
+
+                            for mangadotnet_chapter in mangadotnet_chapters:
+                                mangadotnet_language = dict_get_recursive(mangadotnet_chapter, "language")
+                                mangadotnet_chapter_number = dict_get_recursive(mangadotnet_chapter, "chapter_number")
+
+                                if (
+                                    chapter.language == mangadotnet_language
+                                    and chapter.chapter_number == mangadotnet_chapter_number
+                                ):
+                                    for mangadotnet_group in dict_get_recursive(
+                                        mangadotnet_chapter, "groups", default=[]
+                                    ):
+                                        if chapter.scanlator_group == dict_get_recursive(mangadotnet_group, "name"):
+                                            return True
+                        else:
+                            mangadotnet_volumes = await mangadotnet_api.get_volumes_by_id(mangadotnet_id)
+
+                            for mangadotnet_volume in mangadotnet_volumes:
+                                mangadotnet_language = dict_get_recursive(mangadotnet_volume, "language")
+                                mangadotnet_volume_number = dict_get_recursive(mangadotnet_volume, "volume_number")
+
+                                if (
+                                    chapter.language == mangadotnet_language
+                                    and chapter.volume_number == mangadotnet_volume_number
+                                ):
+                                    for mangadotnet_group in dict_get_recursive(
+                                        mangadotnet_volume, "groups", default=[]
+                                    ):
+                                        if chapter.scanlator_group == dict_get_recursive(mangadotnet_group, "name"):
                                             return True
 
                         return False
 
                     if mangadotnet_id is not None:
-                        mangadotnet_chapters = await mangadotnet_api.get_chapters_by_id(mangadotnet_id)
-                        if mangadotnet_chapters is not None:
-                            for chapter in chapters:
-                                chapter.uploaded = is_chapter_uploaded(chapter, mangadotnet_chapters)
+                        for chapter in chapters:
+                            chapter.uploaded = await is_chapter_uploaded(chapter)
 
                     module_manga = ModuleManga(
                         detail.title,
@@ -383,12 +382,8 @@ async def fetch_module_listing_details(
                     )
 
                     data.add_module_manga(rowid, module_manga)
-                except ClientError as error:
-                    if isinstance(error, ClientResponseError) and error.code == 404:
-                        # Link is probably no longer valid, let's just purge them.
-                        data.remove_module_manga(rowid)
-                    else:
-                        total_progress.print(f"Error fetching {title}")
+                except ClientError:
+                    total_progress.print(f"Error fetching {title}")
                 finally:
                     current_progress.remove_task(task_id)
                     total_progress.advance(total_progress_task_id)
@@ -403,9 +398,9 @@ async def fetch_module_listing_details(
                     )
 
             total_progress.print(f"Done fetching {module.display_name} Listing Details")
-        except* Exception as error:
+        except* Exception:
             total_progress.print(f"Error fetching {module.display_name} Listing Details")
-            logging.getLogger().error(f"Error fetching {module.display_name} Listing Details", exc_info=error)
+            logging.getLogger().exception(f"Error fetching {module.display_name} Listing Details")
 
 
 async def upload_chapters(
@@ -671,7 +666,7 @@ async def upload_chapters(
                             )
                         )
             except* Exception as error:
-                logging.getLogger().exception(error.message, exc_info=error)
+                logging.getLogger().exception(error.message)
 
             total_progress.advance(total_progress_task)
 

@@ -40,8 +40,8 @@ class MangaDotNetScraperData(AbstractContextManager):
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         self._config = config
         self._connection = sqlite3_connect(config.data_file, autocommit=False)
-        self.initialize()
         self._connection.execute("PRAGMA foreign_keys = 1;")
+        self.initialize()
 
     def __exit__(
         self,
@@ -54,13 +54,65 @@ class MangaDotNetScraperData(AbstractContextManager):
 
     def initialize(self) -> None:
         with self._connection as connection:
-            connection.execute(
+            connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS db_version
                 (
                     table_name  TEXT    NOT NULL PRIMARY KEY,
                     version     INTEGER NOT NULL DEFAULT 1
                 );
+
+                CREATE TABLE IF NOT EXISTS module_manga
+                (
+                    rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    module_id       TEXT    NOT NULL,
+                    manga_id        TEXT    NOT NULL,
+                    link            TEXT    NOT NULL,
+                    title           TEXT    NOT NULL,
+                    alt_titles      TEXT    DEFAULT NULL,
+                    mangabaka_id    INTEGER DEFAULT NULL,
+                    mangadotnet_id  INTEGER DEFAULT NULL,
+                    last_checked    INTEGER DEFAULT NULL,
+                    manual_override INTEGER NOT NULL DEFAULT 0,
+                    half_chapters   INTEGER NOT NULL DEFAULT 0,
+                    CONSTRAINT module_manga_unique_manga_id UNIQUE (module_id, manga_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS module_manga_index_title ON module_manga (module_id, title ASC);
+
+                CREATE TABLE IF NOT EXISTS module_chapter
+                (
+                    manga_rowid     INTEGER NOT NULL,
+                    language        TEXT NOT NULL DEFAULT "en",
+                    scanlator_group TEXT NOT NULL,
+                    type            TEXT NOT NULL DEFAULT "chapter",
+                    chapter_number  REAL DEFAULT NULL,
+                    volume_number   REAL DEFAULT NULL,
+                    title           TEXT NOT NULL,
+                    link            TEXT NOT NULL,
+                    chapter_id      TEXT NOT NULL,
+                    uploaded        INTEGER NOT NULL DEFAULT 0,
+                    skip_upload     INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (manga_rowid) REFERENCES module_manga (rowid) ON UPDATE CASCADE ON DELETE CASCADE
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS module_chapter_unique_index_chapter ON module_chapter
+                (
+                    manga_rowid,
+                    language,
+                    scanlator_group,
+                    chapter_number
+                ) WHERE type = "chapter";
+
+                CREATE UNIQUE INDEX IF NOT EXISTS module_chapter_unique_index_volume ON module_chapter
+                (
+                    manga_rowid,
+                    language,
+                    scanlator_group,
+                    volume_number
+                ) WHERE type = "volume";
+
+                INSERT OR IGNORE INTO db_version (table_name, version) VALUES ("module_manga", 6), ("module_chapter", 5);
                 """
             )
 
@@ -69,322 +121,6 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             for table_name, version in cursor:
                 table_version[table_name] = version
-
-            if table_version.get("module_manga", 1) < 2:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_manga_temp
-                    (
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        module_id       TEXT    NOT NULL,
-                        link            TEXT    NOT NULL,
-                        title           TEXT    DEFAULT NULL,
-                        alt_titles      TEXT    DEFAULT NULL,
-                        mangabaka_id    INTEGER DEFAULT NULL,
-                        mangadotnet_id  INTEGER DEFAULT NULL,
-                        last_checked    INTEGER DEFAULT NULL,
-                        manual_override INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (module_id, link),
-                        FOREIGN KEY (rowid) REFERENCES module_chapter(manga_rowid) ON UPDATE CASCADE ON DELETE CASCADE
-                    );
-
-                    INSERT INTO module_manga_temp
-                    (
-                        rowid,
-                        module_id,
-                        link,
-                        title,
-                        alt_titles,
-                        mangabaka_id,
-                        mangadotnet_id,
-                        last_checked,
-                        manual_override
-                    )
-                    SELECT rowid, module_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override
-                    FROM module_manga;
-
-                    DROP TABLE module_manga;
-
-                    ALTER TABLE module_manga_temp RENAME TO module_manga;
-
-                    INSERT INTO db_version(table_name, version) VALUES ('module_manga', 2);
-                    """
-                )
-
-            if table_version.get("module_manga", 1) < 3:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_manga_temp
-                    (
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        module_id       TEXT    NOT NULL,
-                        link            TEXT    NOT NULL,
-                        title           TEXT    DEFAULT NULL,
-                        alt_titles      TEXT    DEFAULT NULL,
-                        mangabaka_id    INTEGER DEFAULT NULL,
-                        mangadotnet_id  INTEGER DEFAULT NULL,
-                        last_checked    INTEGER DEFAULT NULL,
-                        manual_override INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (module_id, link)
-                    );
-
-                    INSERT INTO module_manga_temp
-                    (
-                        rowid,
-                        module_id,
-                        link,
-                        title,
-                        alt_titles,
-                        mangabaka_id,
-                        mangadotnet_id,
-                        last_checked,
-                        manual_override
-                    )
-                    SELECT rowid, module_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override
-                    FROM module_manga;
-
-                    DROP TABLE module_manga;
-
-                    ALTER TABLE module_manga_temp RENAME TO module_manga;
-
-                    UPDATE db_version SET version = 3 WHERE table_name = 'module_manga';
-                    """
-                )
-
-            if table_version.get("module_manga", 1) < 4:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_manga_temp
-                    (
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        module_id       TEXT    NOT NULL,
-                        manga_id        TEXT    NOT NULL,
-                        link            TEXT    NOT NULL,
-                        title           TEXT    DEFAULT NULL,
-                        alt_titles      TEXT    DEFAULT NULL,
-                        mangabaka_id    INTEGER DEFAULT NULL,
-                        mangadotnet_id  INTEGER DEFAULT NULL,
-                        last_checked    INTEGER DEFAULT NULL,
-                        manual_override INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (module_id, link)
-                    );
-
-                    INSERT INTO module_manga_temp
-                    (
-                        rowid,
-                        module_id,
-                        manga_id,
-                        link,
-                        title,
-                        alt_titles,
-                        mangabaka_id,
-                        mangadotnet_id,
-                        last_checked,
-                        manual_override
-                    )
-                    SELECT rowid, module_id, link, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override
-                    FROM module_manga;
-
-                    DROP TABLE module_manga;
-
-                    ALTER TABLE module_manga_temp RENAME TO module_manga;
-
-                    UPDATE db_version SET version = 4 WHERE table_name = 'module_manga';
-                    """
-                )
-
-            if table_version.get("module_manga", 1) < 5:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_manga_temp
-                    (
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        module_id       TEXT    NOT NULL,
-                        manga_id        TEXT    NOT NULL,
-                        link            TEXT    NOT NULL,
-                        title           TEXT    DEFAULT NULL,
-                        alt_titles      TEXT    DEFAULT NULL,
-                        mangabaka_id    INTEGER DEFAULT NULL,
-                        mangadotnet_id  INTEGER DEFAULT NULL,
-                        last_checked    INTEGER DEFAULT NULL,
-                        manual_override INTEGER NOT NULL DEFAULT 0,
-                        CONSTRAINT module_manga_unique_manga_id UNIQUE (module_id, manga_id)
-                    );
-
-                    INSERT INTO module_manga_temp
-                    (
-                        rowid,
-                        module_id,
-                        manga_id,
-                        link,
-                        title,
-                        alt_titles,
-                        mangabaka_id,
-                        mangadotnet_id,
-                        last_checked,
-                        manual_override
-                    )
-                    SELECT rowid, module_id, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override
-                    FROM module_manga;
-
-                    DROP TABLE module_manga;
-
-                    ALTER TABLE module_manga_temp RENAME TO module_manga;
-
-                    UPDATE db_version SET version = 5 WHERE table_name = "module_manga";
-                    """
-                )
-
-            if table_version.get("module_manga", 1) < 6:
-                connection.executescript(
-                    """
-                    ALTER TABLE module_manga ADD COLUMN half_chapters INTEGER NOT NULL DEFAULT 0;
-                    UPDATE db_version SET version = 6 WHERE table_name = "module_manga";
-                    """
-                )
-
-            if table_version.get("module_chapter", 1) < 2:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_chapter_temp
-                    (
-                        rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        manga_rowid     INTEGER NOT NULL,
-                        language        TEXT NOT NULL DEFAULT "en",
-                        scanlator_group TEXT NOT NULL,
-                        chapter_number  REAL NOT NULL,
-                        volume_number   REAL DEFAULT NULL,
-                        chapter_title   TEXT NOT NULL,
-                        link            TEXT NOT NULL,
-                        uploaded        INTEGER NOT NULL DEFAULT 0,
-                        skip_upload     INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (manga_rowid, language ASC, scanlator_group ASC, chapter_number ASC)
-                    );
-
-                    INSERT INTO module_chapter_temp
-                    (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        chapter_number,
-                        chapter_title,
-                        link,
-                        uploaded,
-                        skip_upload
-                    )
-                    SELECT ref_id, language, scanlator_group, number, chapter_title, link, uploaded, skip_upload
-                    FROM module_chapter;
-
-                    DROP TABLE module_chapter;
-
-                    ALTER TABLE module_chapter_temp RENAME TO module_chapter;
-
-                    INSERT INTO db_version(table_name, version) VALUES ('module_chapter', 2);
-                    """
-                )
-
-            if table_version.get("module_chapter", 1) < 3:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_chapter_temp
-                    (
-                        manga_rowid     INTEGER NOT NULL,
-                        language        TEXT NOT NULL DEFAULT "en",
-                        scanlator_group TEXT NOT NULL,
-                        chapter_number  REAL NOT NULL,
-                        volume_number   REAL DEFAULT NULL,
-                        chapter_title   TEXT NOT NULL,
-                        link            TEXT NOT NULL,
-                        uploaded        INTEGER NOT NULL DEFAULT 0,
-                        skip_upload     INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE (manga_rowid, language ASC, scanlator_group ASC, chapter_number ASC),
-                        FOREIGN KEY (manga_rowid) REFERENCES module_manga(rowid) ON UPDATE CASCADE ON DELETE CASCADE
-                    );
-
-                    INSERT INTO module_chapter_temp
-                    (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        chapter_number,
-                        chapter_title,
-                        link,
-                        uploaded,
-                        skip_upload
-                    )
-                    SELECT manga_rowid, language, scanlator_group, chapter_number, chapter_title, link, uploaded, skip_upload
-                    FROM module_chapter;
-
-                    DROP TABLE module_chapter;
-
-                    ALTER TABLE module_chapter_temp RENAME TO module_chapter;
-
-                    UPDATE db_version SET version = 3 WHERE table_name = 'module_chapter';
-                    """
-                )
-
-            if table_version.get("module_chapter", 1) < 4:
-                connection.executescript(
-                    """
-                    CREATE TABLE module_chapter_temp
-                    (
-                        manga_rowid     INTEGER NOT NULL,
-                        language        TEXT NOT NULL DEFAULT "en",
-                        scanlator_group TEXT NOT NULL,
-                        type            TEXT NOT NULL DEFAULT "chapter",
-                        chapter_number  REAL DEFAULT NULL,
-                        volume_number   REAL DEFAULT NULL,
-                        title           TEXT NOT NULL,
-                        link            TEXT NOT NULL,
-                        chapter_id      TEXT NOT NULL,
-                        uploaded        INTEGER NOT NULL DEFAULT 0,
-                        skip_upload     INTEGER NOT NULL DEFAULT 0,
-                        FOREIGN KEY (manga_rowid) REFERENCES module_manga (rowid) ON UPDATE CASCADE ON DELETE CASCADE
-                    );
-
-                    INSERT INTO module_chapter_temp
-                    (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        chapter_number,
-                        title,
-                        link,
-                        chapter_id,
-                        uploaded,
-                        skip_upload
-                    )
-                    SELECT manga_rowid, language, scanlator_group, chapter_number, chapter_title, link, link, uploaded, skip_upload
-                    FROM module_chapter;
-
-                    DROP TABLE module_chapter;
-
-                    ALTER TABLE module_chapter_temp RENAME TO module_chapter;
-
-                    UPDATE db_version SET version = 4 WHERE table_name = 'module_chapter';
-                    """
-                )
-
-            if table_version.get("module_chapter", 1) < 5:
-                connection.executescript(
-                    """
-                    CREATE UNIQUE INDEX IF NOT EXISTS module_chapter_unique_index_chapter ON module_chapter (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        chapter_number
-                    ) WHERE type = "chapter";
-
-                    CREATE UNIQUE INDEX IF NOT EXISTS module_chapter_unique_index_volume ON module_chapter (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        volume_number
-                    ) WHERE type = "volume";
-
-                    UPDATE db_version SET version = 5 WHERE table_name = 'module_chapter';
-                    """
-                )
 
     def close(self) -> None:
         self._connection.close()
@@ -431,7 +167,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                 FROM module_manga
                 WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
-                ORDER BY title ASC;
+                ORDER BY title;
                 """
             )
         else:
@@ -442,7 +178,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                 SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                 FROM module_manga
                 WHERE module_id = {module_id}
-                ORDER BY title ASC;
+                ORDER BY title;
                 """
             )
 
@@ -462,7 +198,7 @@ class MangaDotNetScraperData(AbstractContextManager):
             SELECT rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id
             FROM module_manga
             WHERE module_id = {module_id} AND mangadotnet_id IS NULL
-            ORDER BY rowid ASC;
+            ORDER BY rowid;
             """
         )
 

@@ -50,10 +50,10 @@ class MangaDotNetProfileData(TypedDict):
 
 class MangaDotNetChapterList(TypedDict):
     id: ReadOnly[int]
-    chapter_number: ReadOnly[float]
+    chapter_number: ReadOnly[float | None]
     volume_number: ReadOnly[float | None]
     language: ReadOnly[str]
-    groups: Collection[MangaDotNetChapterListGroup]
+    groups: ReadOnly[Collection[MangaDotNetChapterListGroup]]
 
 
 class MangaDotNetChapterListGroup(TypedDict):
@@ -63,9 +63,26 @@ class MangaDotNetChapterListGroup(TypedDict):
     is_scanlator: ReadOnly[bool]
 
 
+class MangaDotNetVolumeList(TypedDict):
+    id: ReadOnly[int]
+    volume_number: ReadOnly[float]
+    language: ReadOnly[str]
+    groups: ReadOnly[Collection[MangaDotNetChapterListGroup]]
+
+
+class MangaDotNetMangaEntry(TypedDict):
+    manga: ReadOnly[MangaDotNetMangaEntryData]
+
+
+class MangaDotNetMangaEntryData(TypedDict):
+    id: ReadOnly[int]
+    title: ReadOnly[str]
+    alt_titles: ReadOnly[Collection[str]]
+
+
 class MangaDotNetGroupList(TypedDict):
     success: ReadOnly[Literal[True]]
-    groups: Collection[MangaDotNetGroupListData]
+    groups: ReadOnly[Collection[MangaDotNetGroupListData]]
 
 
 class MangaDotNetGroupListData(TypedDict):
@@ -265,7 +282,6 @@ class MangaDotNetLoginMiddleware(Middleware):
 
 class MangaDotNetApi(AbstractAsyncContextManager):
     _BASE_API_URL = "https://mangadot.net"
-    _AUTHENTICATION_COOKIE = "ory_kratos_session"
 
     _TUS_VERSION = "1.0.0"
     _TUS_MAX_UPLOAD_SIZE = 900 * 1024 * 1024
@@ -371,9 +387,16 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             return await response.json()
 
     @retryable_client_session
-    async def get_chapters_by_id(self, ids: int) -> list[MangaDotNetChapterList] | None:
-        async with self._session.get(f"/api/manga/{ids}/chapters/list") as response:
-            return await response.json() if response.ok else None
+    async def get_chapters_by_id(self, mangadotnet_id: int) -> list[MangaDotNetChapterList]:
+        async with self._session.get(f"/api/manga/{mangadotnet_id}/chapters/list") as response:
+            await self._raise_for_status(response)
+            return await response.json()
+
+    @retryable_client_session
+    async def get_volumes_by_id(self, mangadotnet_id: int) -> list[MangaDotNetVolumeList]:
+        async with self._session.get(f"/api/manga/{mangadotnet_id}/volumes") as response:
+            await self._raise_for_status(response)
+            return await response.json()
 
     @retryable_client_session
     async def get_id_from_mangabaka_id(self, mangabaka_id: int) -> int | None:
@@ -389,25 +412,12 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     return None
 
     @retryable_client_session
-    async def get_entry_by_id(self, ids: int) -> dict[str, Any] | None:
-        async with self._session.get(
-            f"/manga/{ids}.data",
-            params={"_routes": "pages/MangaDetailPage"},
-        ) as response:
-            if not response.ok:
-                return None
+    async def get_entry_by_id(self, mangadotnet_id: int) -> MangaDotNetMangaEntry:
+        async with self._session.get(f"/api/manga/{mangadotnet_id}") as response:
+            await self._raise_for_status(response)
+            return await response.json()
 
-            json_ptr_data = await response.json(content_type="text/x-script")
-            json = self._resolve_ptr_table_json(json_ptr_data, 0)
-
-            if isinstance(json, dict) and "pages/MangaDetailPage" in json:
-                manga_detail_page = json["pages/MangaDetailPage"]
-                if isinstance(manga_detail_page, dict) and "data" in manga_detail_page:
-                    return manga_detail_page["data"]
-
-            return None
-
-    async def get_entry_by_title(self, titles: str | Iterable[str]) -> dict[str, Any] | None:
+    async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaDotNetMangaEntry | None:
         if isinstance(titles, str):
             titles = [titles]
 
@@ -415,51 +425,32 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
         for title in titles:
             async with self._session.get(
-                "/search.data",
-                params={"search": title, "_routes": "pages/SearchPage"},
+                "/api/search", params={"search": title, "sortBy": "relevance", "limit": 10}
             ) as response:
-                if not response.ok:
-                    return None
+                await self._raise_for_status(response)
+                json = await response.json()
 
-                json_ptr_data = await response.json(content_type="text/x-script")
-                json = self._resolve_ptr_table_json(json_ptr_data, 0)
+                for manga in dict_get_recursive(json, "manga_list", default=[]):
+                    manga_id = dict_get_recursive(manga, "id")
 
-                if isinstance(json, dict) and "pages/SearchPage" in json:
-                    search_page = json["pages/SearchPage"]
-                    if isinstance(search_page, dict) and "data" in search_page:
-                        data = search_page["data"]
-                        if isinstance(data, dict) and "payload" in data:
-                            payload = data["payload"]
-                            if isinstance(payload, dict) and "manga_list" in payload:
-                                manga_list = payload["manga_list"]
-                                if isinstance(manga_list, list):
-                                    manga_ids = []
+                    if manga_id is None:
+                        continue
 
-                                    for manga in manga_list:
-                                        if isinstance(manga, dict) and "id" in manga:
-                                            manga_ids.append(manga["id"])
+                    manga_entry = await self.get_entry_by_id(manga_id)
 
-                                    manga_entries = []
+                    if title == dict_get_recursive(manga_entry, "manga", "title"):
+                        matches.append(manga_entry)
+                        continue
 
-                                    for manga_id in manga_ids:
-                                        manga_entries.append(await self.get_entry_by_id(manga_id))
-
-                                    for manga_entry in manga_entries:
-                                        if isinstance(manga_entry, dict) and "mangaData" in manga_entry:
-                                            manga_data = manga_entry["mangaData"]
-                                            if isinstance(manga_data, dict) and "manga" in manga_data:
-                                                manga = manga_data["manga"]
-                                                if (
-                                                    isinstance(manga, dict)
-                                                    and "title" in manga_data
-                                                    and "alt_titles" in manga_data
-                                                ) and manga["title"] in titles:
-                                                    matches.append(manga_entry)
+                    for manga_title in dict_get_recursive(manga_entry, "manga", "alt_titles", default=[]):
+                        if title == manga_title:
+                            matches.append(manga_entry)
+                            break
 
         if len(matches) == 0:
             return None
 
-        count = Counter(json_data["mangaData"]["manga"]["id"] for json_data in matches)
+        count = Counter(dict_get_recursive(json_data, "manga", "id") for json_data in matches)
         common = count.most_common()
 
         common_id = None
@@ -480,7 +471,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             return None
 
         for json_data in matches:
-            if json_data["mangaData"]["manga"]["id"] == common_id:
+            if dict_get_recursive(json_data, "manga", "id") == common_id:
                 return json_data
 
         return None
@@ -720,20 +711,16 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             await self._raise_for_status(response)
             return await response.json()
 
-    async def create_from_mangabaka(
-        self, mangabaka_id: int
-    ) -> MangaDotNetCreateFromMangaBakaResponse | MangaDotNetFetchMangaBakaError | MangaDotNetResponseError:
+    async def create_from_mangabaka(self, mangabaka_id: int) -> MangaDotNetCreateFromMangaBakaResponse:
         @retryable_client_session
-        async def fetch_mangabaka(id: int) -> MangaDotNetFetchMangaBaka | MangaDotNetFetchMangaBakaError:
+        async def fetch_mangabaka(id: int) -> MangaDotNetFetchMangaBaka:
             async with self._session.post(
                 "/api/manga/fetch-mangabaka", json={"url": f"https://mangabaka.org/manga/{id}"}
             ) as response:
+                await self._raise_for_status(response)
                 return await response.json()
 
         mb_json = await fetch_mangabaka(mangabaka_id)
-
-        if mb_json["success"] == False:
-            return mb_json
 
         def parse_json(data: MangaDotNetFetchMangaBakaData) -> dict[str, str]:
             result = {}
@@ -752,9 +739,10 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         @retryable_client_session
         async def create_entry(
             json: MangaDotNetFetchMangaBakaData,
-        ) -> MangaDotNetCreateFromMangaBakaResponse | MangaDotNetResponseError:
+        ) -> MangaDotNetCreateFromMangaBakaResponse:
             form_data = FormData(parse_json(json), default_to_multipart=True)
             async with self._session.post("/api/manga/create-from-mangabaka", data=form_data) as response:
+                await self._raise_for_status(response)
                 return await response.json()
 
-        return await create_entry(mb_json["data"])
+        return await create_entry(dict_get_recursive(mb_json, "data"))

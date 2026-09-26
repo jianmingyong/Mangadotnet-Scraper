@@ -100,7 +100,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
                 for data in dict_get_recursive(json, "data", default=[]):
                     for inner_title in dict_get_recursive(data, "titles", default=[]):
-                        if title == inner_title:
+                        if title == dict_get_recursive(inner_title, "title"):
                             matches.append(data)
                             break
 
@@ -122,7 +122,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
 
                 for data in dict_get_recursive(json, "data", default=[]):
                     for inner_title in dict_get_recursive(data, "titles", default=[]):
-                        if title == inner_title:
+                        if title == dict_get_recursive(inner_title, "title"):
                             matches.append(data)
                             break
 
