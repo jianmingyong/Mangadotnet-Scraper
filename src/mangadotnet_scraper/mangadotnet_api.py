@@ -1,8 +1,8 @@
 import json
-from asyncio import sleep
+from asyncio import Lock, sleep
 from base64 import b64encode
 from collections import Counter
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
@@ -53,7 +53,7 @@ class MangaDotNetChapterList(TypedDict):
     chapter_number: ReadOnly[float | None]
     volume_number: ReadOnly[float | None]
     language: ReadOnly[str]
-    groups: ReadOnly[Collection[MangaDotNetChapterListGroup]]
+    groups: ReadOnly[Sequence[MangaDotNetChapterListGroup]]
 
 
 class MangaDotNetChapterListGroup(TypedDict):
@@ -67,7 +67,7 @@ class MangaDotNetVolumeList(TypedDict):
     id: ReadOnly[int]
     volume_number: ReadOnly[float]
     language: ReadOnly[str]
-    groups: ReadOnly[Collection[MangaDotNetChapterListGroup]]
+    groups: ReadOnly[Sequence[MangaDotNetChapterListGroup]]
 
 
 class MangaDotNetMangaEntry(TypedDict):
@@ -77,12 +77,12 @@ class MangaDotNetMangaEntry(TypedDict):
 class MangaDotNetMangaEntryData(TypedDict):
     id: ReadOnly[int]
     title: ReadOnly[str]
-    alt_titles: ReadOnly[Collection[str]]
+    alt_titles: ReadOnly[Sequence[str]]
 
 
 class MangaDotNetGroupList(TypedDict):
     success: ReadOnly[Literal[True]]
-    groups: ReadOnly[Collection[MangaDotNetGroupListData]]
+    groups: ReadOnly[Sequence[MangaDotNetGroupListData]]
 
 
 class MangaDotNetGroupListData(TypedDict):
@@ -110,14 +110,14 @@ class MangaDotNetFetchMangaBakaData(TypedDict):
     status: ReadOnly[str]
     hiatus: ReadOnly[str]
     country_of_origin: ReadOnly[str]
-    genres: ReadOnly[Collection[str]]
-    alt_titles: ReadOnly[Collection[str]]
+    genres: ReadOnly[Sequence[str]]
+    alt_titles: ReadOnly[Sequence[str]]
     authors: ReadOnly[str]
     artists: ReadOnly[str]
     year: ReadOnly[int]
     content_rating: ReadOnly[str]
     rating: ReadOnly[float | None]
-    tags: ReadOnly[Collection[str]]
+    tags: ReadOnly[Sequence[str]]
     anilist_id: ReadOnly[int | None]
     mangaupdates_id: ReadOnly[str | None]
     mangabaka_id: ReadOnly[int]
@@ -142,10 +142,12 @@ class MangaDotNetLoginMiddleware(Middleware):
 
     _config: Final[MangaDotNetScraperConfig]
     _mangadotnet_api: Final[MangaDotNetApi]
+    _lock: Final[Lock]
 
     def __init__(self, config: MangaDotNetScraperConfig, mangadotnet_api: MangaDotNetApi) -> None:
         self._config = config
         self._mangadotnet_api = mangadotnet_api
+        self._lock = Lock()
 
     @property
     def user_session_cookie(self) -> str | None:
@@ -164,6 +166,8 @@ class MangaDotNetLoginMiddleware(Middleware):
         response = await update_cookies_and_request()
 
         if response.status == self._UNAUTHORIZED_STATUS_CODE:
+            self.user_session_cookie = None
+
             if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
                 raise ClientResponseError(
                     response.request_info,
@@ -173,109 +177,117 @@ class MangaDotNetLoginMiddleware(Middleware):
                     headers=response.headers,
                 )
 
-            try:
-                async with (
-                    create_browser() as browser,
-                    await cast(Browser, browser).new_context() as context,
-                ):
-                    page = await context.new_page()
-
-                    async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
-                        await page.goto(f"{self._mangadotnet_api._BASE_API_URL}/login", wait_until="domcontentloaded")
-
-                        # Check for cloudflare
-                        try:
-                            await page.wait_for_selector('input[name="cf-turnstile-response"]', state="hidden")
-                            await solver.solve_captcha(
-                                captcha_container=page,
-                                captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
-                            )
-                        except (
-                            TimeoutError,
-                            CaptchaDetectionError,
-                            CaptchaDataDetectionError,
-                            CaptchaSolvingError,
-                            CaptchaApplyingError,
-                        ):
-                            pass
-
-                        username_element = await page.wait_for_selector("#identifier", state="attached", strict=True)
-                        if username_element is None:
-                            raise ClientResponseError(
-                                response.request_info,
-                                response.history,
-                                status=response.status,
-                                message="Unable to find username field",
-                                headers=response.headers,
-                            )
-                        await username_element.type(self._config.mangadotnet_username)
-
-                        password_element = await page.wait_for_selector("#password", state="attached", strict=True)
-                        if password_element is None:
-                            raise ClientResponseError(
-                                response.request_info,
-                                response.history,
-                                status=response.status,
-                                message="Unable to find password field",
-                                headers=response.headers,
-                            )
-                        await password_element.type(self._config.mangadotnet_password)
-
-                        try:
-                            await solver.solve_captcha(
-                                captcha_container=page,
-                                captcha_type=CaptchaType.CLOUDFLARE_TURNSTILE,
-                                expected_content_selector='form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
-                            )
-                        except (
-                            CaptchaDetectionError,
-                            CaptchaDataDetectionError,
-                            CaptchaSolvingError,
-                            CaptchaApplyingError,
-                        ):
-                            raise ClientResponseError(
-                                response.request_info,
-                                response.history,
-                                status=response.status,
-                                message="Unable to solve CF captcha",
-                                headers=response.headers,
-                            )
-
-                        submit_button = page.get_by_text("Log in", exact=True)
-
-                        while not page.is_closed() and await submit_button.is_disabled():
-                            await sleep(1)
-
-                        await submit_button.click()
-
-                    try:
-                        await page.wait_for_url(self._mangadotnet_api._BASE_API_URL, wait_until="commit")
-                    except TimeoutError:
-                        # login fail because of something...
-                        raise ClientResponseError(
-                            response.request_info,
-                            response.history,
-                            status=response.status,
-                            message="Mangadotnet username or password are invalid",
-                            headers=response.headers,
-                        )
-
-                    cookies = await context.cookies(self._mangadotnet_api._BASE_API_URL)
-
-                    for cookie in cookies:
-                        if cookie.get("name") == self._AUTHENTICATION_COOKIE:
-                            self.user_session_cookie = cookie.get("value")
-                            break
-
+            async with self._lock:
+                if self.user_session_cookie is not None:
                     return await update_cookies_and_request()
-            except Error as error:
-                raise ClientResponseError(
-                    response.request_info,
-                    response.history,
-                    status=response.status,
-                    message=error.message,
-                    headers=response.headers,
-                )
+
+                try:
+                    async with (
+                        create_browser() as browser,
+                        await cast(Browser, browser).new_context() as context,
+                    ):
+                        page = await context.new_page()
+
+                        async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
+                            await page.goto(
+                                f"{self._mangadotnet_api._BASE_API_URL}/login", wait_until="domcontentloaded"
+                            )
+
+                            # Check for cloudflare
+                            try:
+                                await page.wait_for_selector('input[name="cf-turnstile-response"]', state="hidden")
+                                await solver.solve_captcha(
+                                    captcha_container=page,
+                                    captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                                )
+                            except (
+                                TimeoutError,
+                                CaptchaDetectionError,
+                                CaptchaDataDetectionError,
+                                CaptchaSolvingError,
+                                CaptchaApplyingError,
+                            ):
+                                pass
+
+                            username_element = await page.wait_for_selector(
+                                "#identifier", state="attached", strict=True
+                            )
+                            if username_element is None:
+                                raise ClientResponseError(
+                                    response.request_info,
+                                    response.history,
+                                    status=response.status,
+                                    message="Unable to find username field",
+                                    headers=response.headers,
+                                )
+                            await username_element.type(self._config.mangadotnet_username)
+
+                            password_element = await page.wait_for_selector("#password", state="attached", strict=True)
+                            if password_element is None:
+                                raise ClientResponseError(
+                                    response.request_info,
+                                    response.history,
+                                    status=response.status,
+                                    message="Unable to find password field",
+                                    headers=response.headers,
+                                )
+                            await password_element.type(self._config.mangadotnet_password)
+
+                            try:
+                                await solver.solve_captcha(
+                                    captcha_container=page,
+                                    captcha_type=CaptchaType.CLOUDFLARE_TURNSTILE,
+                                    expected_content_selector='form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
+                                )
+                            except (
+                                CaptchaDetectionError,
+                                CaptchaDataDetectionError,
+                                CaptchaSolvingError,
+                                CaptchaApplyingError,
+                            ):
+                                raise ClientResponseError(
+                                    response.request_info,
+                                    response.history,
+                                    status=response.status,
+                                    message="Unable to solve CF captcha",
+                                    headers=response.headers,
+                                )
+
+                            submit_button = page.get_by_text("Log in", exact=True)
+
+                            while not page.is_closed() and await submit_button.is_disabled():
+                                await sleep(1)
+
+                            await submit_button.click()
+
+                        try:
+                            await page.wait_for_url(self._mangadotnet_api._BASE_API_URL, wait_until="commit")
+                        except TimeoutError:
+                            # login fail because of something...
+                            raise ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message="Mangadotnet username or password are invalid",
+                                headers=response.headers,
+                            )
+
+                        cookies = await context.cookies(self._mangadotnet_api._BASE_API_URL)
+
+                        for cookie in cookies:
+                            if cookie.get("name") == self._AUTHENTICATION_COOKIE:
+                                self.user_session_cookie = cookie.get("value")
+                                break
+
+                        return await update_cookies_and_request()
+                except Error as error:
+                    raise ClientResponseError(
+                        response.request_info,
+                        response.history,
+                        status=response.status,
+                        message=error.message,
+                        headers=response.headers,
+                    )
 
         return response
 
@@ -387,13 +399,13 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             return await response.json()
 
     @retryable_client_session
-    async def get_chapters_by_id(self, mangadotnet_id: int) -> list[MangaDotNetChapterList]:
+    async def get_chapters_by_id(self, mangadotnet_id: int) -> Sequence[MangaDotNetChapterList]:
         async with self._session.get(f"/api/manga/{mangadotnet_id}/chapters/list") as response:
             await self._raise_for_status(response)
             return await response.json()
 
     @retryable_client_session
-    async def get_volumes_by_id(self, mangadotnet_id: int) -> list[MangaDotNetVolumeList]:
+    async def get_volumes_by_id(self, mangadotnet_id: int) -> Sequence[MangaDotNetVolumeList]:
         async with self._session.get(f"/api/manga/{mangadotnet_id}/volumes") as response:
             await self._raise_for_status(response)
             return await response.json()
@@ -678,7 +690,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     class MangaDotNetUploadedMangaList(TypedDict):
         success: ReadOnly[Literal[True]]
         total: ReadOnly[int]
-        uploads: ReadOnly[Collection[MangaDotNetApi.MangaDotNetUploadedMangaListUpload]]
+        uploads: ReadOnly[Sequence[MangaDotNetApi.MangaDotNetUploadedMangaListUpload]]
         pagination: ReadOnly[MangaDotNetApi.MangaDotNetUploadedMangaListPagination]
 
     class MangaDotNetUploadedMangaListUpload(TypedDict):
@@ -691,7 +703,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         language: ReadOnly[str]
         scanlator_name: ReadOnly[str | None]
         type: ReadOnly[Literal["chapter", "volume"]]
-        groups: ReadOnly[Collection[MangaDotNetApi.MangaDotNetUploadedMangaListUploadGroup]]
+        groups: ReadOnly[Sequence[MangaDotNetApi.MangaDotNetUploadedMangaListUploadGroup]]
 
     class MangaDotNetUploadedMangaListUploadGroup(TypedDict):
         id: ReadOnly[int]
@@ -704,9 +716,9 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         total_pages: ReadOnly[int]
 
     @retryable_client_session
-    async def get_uploaded_manga(self, ids: int, page: int = 1) -> MangaDotNetUploadedMangaList:
+    async def get_uploaded_manga(self, mangadotnet_id: int, page: int = 1) -> MangaDotNetUploadedMangaList:
         async with self._session.get(
-            "/api/uploads/mine", params={"manga_id": ids, "limit": 100, "page": page}
+            "/api/uploads/mine", params={"manga_id": mangadotnet_id, "limit": 100, "page": page}
         ) as response:
             await self._raise_for_status(response)
             return await response.json()
@@ -737,9 +749,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             return result
 
         @retryable_client_session
-        async def create_entry(
-            json: MangaDotNetFetchMangaBakaData,
-        ) -> MangaDotNetCreateFromMangaBakaResponse:
+        async def create_entry(json: MangaDotNetFetchMangaBakaData) -> MangaDotNetCreateFromMangaBakaResponse:
             form_data = FormData(parse_json(json), default_to_multipart=True)
             async with self._session.post("/api/manga/create-from-mangabaka", data=form_data) as response:
                 await self._raise_for_status(response)

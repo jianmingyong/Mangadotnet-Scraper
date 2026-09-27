@@ -1,5 +1,5 @@
 from collections import Counter
-from collections.abc import Collection, Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import TracebackType
 from typing import Final, Literal, ReadOnly, TypedDict
@@ -22,12 +22,12 @@ class MangaBakaEntry(TypedDict):
 
 class MangaBakaEntries(TypedDict):
     status: ReadOnly[Literal[200]]
-    data: ReadOnly[Collection[MangaBakaEntryData]]
+    data: ReadOnly[Sequence[MangaBakaEntryData]]
 
 
 class MangaBakaEntryData(TypedDict):
     id: ReadOnly[int]
-    titles: ReadOnly[Collection[MangaBakaEntryDataTitle]]
+    titles: ReadOnly[Sequence[MangaBakaEntryDataTitle]]
 
 
 class MangaBakaEntryDataTitle(TypedDict):

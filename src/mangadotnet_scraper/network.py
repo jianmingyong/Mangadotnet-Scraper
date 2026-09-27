@@ -127,14 +127,14 @@ class CloudflareMiddleware(Middleware):
         response = await update_and_request()
 
         if response.headers.get("cf-mitigated") == "challenge":
+            self._user_agent = None
+            
+            if request.host in self._cookies:
+                del self._cookies[request.host]
+
             async with self._lock:
                 if self._user_agent is not None and request.host in self._cookies:
                     return await update_and_request()
-
-                self._user_agent = None
-
-                if request.host in self._cookies:
-                    del self._cookies[request.host]
 
                 data = await get_cloudflare_cookies(str(request.url))
 
