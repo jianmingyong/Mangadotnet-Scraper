@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterable, Collection
+from collections.abc import AsyncIterable, Sequence
 from typing import TypedDict, override
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
@@ -19,7 +19,7 @@ class NyxScansModule(BaseModule):
         self.fetch_concurrency = 2
 
     class PostsResponse(TypedDict):
-        posts: Collection[NyxScansModule.PostsResponsePost]
+        posts: Sequence[NyxScansModule.PostsResponsePost]
         totalCount: int
 
     class PostsResponsePost(TypedDict):
@@ -64,7 +64,7 @@ class NyxScansModule(BaseModule):
         post: NyxScansModule.ChaptersResponsePost
 
     class ChaptersResponsePost(TypedDict):
-        chapters: Collection[NyxScansModule.ChaptersResponsePostChapter]
+        chapters: Sequence[NyxScansModule.ChaptersResponsePostChapter]
 
     class ChaptersResponsePostChapter(TypedDict):
         id: int

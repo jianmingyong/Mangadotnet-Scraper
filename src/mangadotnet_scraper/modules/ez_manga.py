@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterable, Collection
+from collections.abc import AsyncIterable, Sequence
 from typing import TypedDict, override
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
@@ -21,7 +21,7 @@ class EzMangaModule(BaseModule):
         )
 
     class MangaListingResponse(TypedDict):
-        data: Collection[EzMangaModule.MangaListingResponseData]
+        data: Sequence[EzMangaModule.MangaListingResponseData]
         totalItems: int
         totalPages: int
         current: int
@@ -67,7 +67,7 @@ class EzMangaModule(BaseModule):
         alternativeTitles: str
 
     class MangaChapterResponse(TypedDict):
-        data: Collection[EzMangaModule.MangaChapterResponseData]
+        data: Sequence[EzMangaModule.MangaChapterResponseData]
         totalItems: int
         nextCursor: str | None
         hasMore: bool

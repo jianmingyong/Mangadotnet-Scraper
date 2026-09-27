@@ -115,20 +115,22 @@ class BaseModule(AbstractAsyncContextManager):
         await self.session.close()
 
     @retryable_client_session
-    async def get_html(self, url: str, params: Query = None) -> str:
-        async with self.session.get(url, params=params) as response:
+    async def get_html(self, url: str, params: Query = None, headers: Mapping[str, str] | None = None) -> str:
+        async with self.session.get(url, params=params, headers=headers) as response:
             response.raise_for_status()
             return await response.text("utf-8")
 
     @retryable_client_session
-    async def get_json(self, url: str, params: Query = None) -> Any:
-        async with self.session.get(url, params=params) as response:
+    async def get_json(self, url: str, params: Query = None, headers: Mapping[str, str] | None = None) -> Any:
+        async with self.session.get(url, params=params, headers=headers) as response:
             response.raise_for_status()
             return await response.json()
 
     @retryable_client_session
-    async def download_image(self, url: str, params: Query = None) -> tuple[str, bytes]:
-        async with self.session.get(url, params=params) as response:
+    async def download_image(
+        self, url: str, params: Query = None, headers: Mapping[str, str] | None = None
+    ) -> tuple[str, bytes]:
+        async with self.session.get(url, params=params, headers=headers) as response:
             response.raise_for_status()
             return (response.content_type, await response.read())
 

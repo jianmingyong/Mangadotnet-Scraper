@@ -35,6 +35,7 @@ from mangadotnet_scraper.modules import (
     BaseModule,
     EzMangaModule,
     NyxScansModule,
+    RinkoComicsModule,
     RitharScansModule,
 )
 from mangadotnet_scraper.utilities import dict_get_recursive
@@ -68,6 +69,7 @@ async def initialize_async() -> None:
         RitharScansModule(config),
         EzMangaModule(config),
         NyxScansModule(config),
+        RinkoComicsModule(config),
     ]
 
     def generate_choices(text: str, start_index: int = 0) -> list[Choice]:
