@@ -631,7 +631,7 @@ async def upload_chapters(
                                 f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
                             )
                     except ClientError:
-                        logging.getLogger().info(
+                        logging.getLogger().exception(
                             f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
                         )
                     finally:
