@@ -166,8 +166,6 @@ class MangaDotNetLoginMiddleware(Middleware):
         response = await update_cookies_and_request()
 
         if response.status == self._UNAUTHORIZED_STATUS_CODE:
-            self.user_session_cookie = None
-
             if self._config.mangadotnet_username is None or self._config.mangadotnet_password is None:
                 raise ClientResponseError(
                     response.request_info,
@@ -178,8 +176,10 @@ class MangaDotNetLoginMiddleware(Middleware):
                 )
 
             async with self._lock:
-                if self.user_session_cookie is not None:
-                    return await update_cookies_and_request()
+                response = await update_cookies_and_request()
+
+                if response.status != self._UNAUTHORIZED_STATUS_CODE:
+                    return response
 
                 try:
                     async with (
