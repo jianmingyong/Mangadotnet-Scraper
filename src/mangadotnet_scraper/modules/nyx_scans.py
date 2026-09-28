@@ -118,7 +118,7 @@ class NyxScansModule(BaseModule):
         chapter: NyxScansModule.ChapterResponseObject
 
     class ChapterResponseObject(TypedDict):
-        images: Collection[NyxScansModule.ChapterResponseObjectImages]
+        images: Sequence[NyxScansModule.ChapterResponseObjectImages]
 
     class ChapterResponseObjectImages(TypedDict):
         id: int
