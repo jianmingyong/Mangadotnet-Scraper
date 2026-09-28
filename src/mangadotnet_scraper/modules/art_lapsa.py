@@ -10,7 +10,7 @@ from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
 from mangadotnet_scraper.network import retryable_client_session
-from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
+from mangadotnet_scraper.utilities import clean_string
 
 
 class ArtLapsaModule(BaseModule):
@@ -126,21 +126,14 @@ class ArtLapsaModule(BaseModule):
 
         if match is None:
             # This is a premium chapter, we can't actually get the data here so we might as well guess?
-            series_id = manga_link[manga_link.rfind("/") + 1 :]
-            chapter_id = chapter_link[chapter_link.rfind("/") + 1 :]
             page = 1
 
-            revision_element = soup.find("script", attrs={"type": "application/ld+json"})
+            revision_element = soup.find("meta", {"property": "og:image"})
 
             if revision_element is None:
                 return []
 
-            try:
-                revision_json = json.loads(revision_element.text)
-            except json.decoder.JSONDecodeError:
-                return []
-
-            revision_id: str | None = dict_get_recursive(revision_json, "image", "url")
+            revision_id = cast(str, revision_element.get("content"))
 
             if revision_id is not None:
                 revision_id = revision_id[: revision_id.rfind("/")]
@@ -158,9 +151,9 @@ class ArtLapsaModule(BaseModule):
             while True:
                 if await test_page_response(
                     page,
-                    f"{self._BASE_CDN_URL}/series/webtoon/{series_id}/chapters/{chapter_id}/{page:03d}.jpg"
+                    f"{self._BASE_CDN_URL}/series/webtoon/{manga_id}/chapters/{chapter_id}/{page:03d}.jpg"
                     if revision_id is None
-                    else f"{self._BASE_CDN_URL}/series/webtoon/{series_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
+                    else f"{self._BASE_CDN_URL}/series/webtoon/{manga_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg",
                 ):
                     page += 1
                 else:
