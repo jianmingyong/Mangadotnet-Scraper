@@ -25,8 +25,8 @@ def create_browser(headless: bool | str = True, **launch_options) -> AsyncCamouf
     elif os == "darwin":
         os = "macos"
 
-    if os == "linux" and headless:
-        headless = "virtual"
+    #if os == "linux" and headless:
+    #    headless = "virtual"
 
     return AsyncCamoufox(
         headless=headless,
