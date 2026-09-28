@@ -179,7 +179,7 @@ class RinkoComicsModule(BaseModule):
 
         for image_element in image_elements:
             page = cast(str, image_element.get("data-page"))
-            src = cast(str, image_element.get("src"))
+            src = cast(str, image_element.get("data-src"))
 
             if page is None or src is None:
                 return []
