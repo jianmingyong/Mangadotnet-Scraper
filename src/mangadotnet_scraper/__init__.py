@@ -522,7 +522,7 @@ async def upload_chapters(
 
                         zip_file_size = zip_buffer.tell()
 
-                        current_progress.update(task_id, completed=0, total=zip_file_size, status="Preparing Upload")
+                        current_progress.update(task_id, completed=0, total=zip_file_size, status="Preparing Upload (1)")
 
                         group_id = group_id_cache.get(scanlator_group)
 
@@ -540,6 +540,10 @@ async def upload_chapters(
 
                         if type != "chapter" and type != "volume":
                             return
+
+                        current_progress.update(
+                            task_id, completed=0, total=zip_file_size, status="Preparing Upload (2)"
+                        )
 
                         try:
                             location = await mangadotnet_api.prepare_upload(
