@@ -135,6 +135,9 @@ class RitharScansModule(BaseModule):
 
             revision_id = cast(str, revision_element.get("content"))
 
+            if revision_id is not None and "/revisions/" not in revision_id:
+                revision_id = None
+
             if revision_id is not None:
                 revision_id = revision_id[: revision_id.rfind("/")]
                 revision_id = revision_id[revision_id.rfind("/") + 1 :]
