@@ -16,7 +16,7 @@ class NyxScansModule(BaseModule):
     @override
     async def initialize(self) -> None:
         await super().initialize()
-        self.fetch_concurrency = 2
+        self.fetch_concurrency = 4
 
     class PostsResponse(TypedDict):
         posts: Sequence[NyxScansModule.PostsResponsePost]
