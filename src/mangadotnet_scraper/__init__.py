@@ -35,6 +35,7 @@ from mangadotnet_scraper.modules import (
     BaseModule,
     EzMangaModule,
     NyxScansModule,
+    OrionScansModule,
     RinkoComicsModule,
     RitharScansModule,
 )
@@ -70,6 +71,7 @@ async def initialize_async() -> None:
         EzMangaModule(config),
         NyxScansModule(config),
         RinkoComicsModule(config),
+        OrionScansModule(config),
     ]
 
     def generate_choices(text: str, start_index: int = 0) -> list[Choice]:
@@ -250,9 +252,9 @@ async def fetch_module_listing(module: BaseModule, data: MangaDotNetScraperData)
                 data.add_module_listing(module.module_id, listing.manga_id, listing.title, listing.link)
 
             progress.print(f"Done fetching {module.display_name} Listing")
-        except Exception:  # noqa: BLE001
+        except Exception:
             progress.print(f"Error fetching {module.display_name} Listing")
-            logging.getLogger().error(f"Error fetching {module.display_name} Listing")
+            logging.getLogger().exception(f"Error fetching {module.display_name} Listing")
 
 
 async def fetch_module_listing_details(
@@ -386,6 +388,7 @@ async def fetch_module_listing_details(
                     data.add_module_manga(rowid, module_manga)
                 except ClientError:
                     total_progress.print(f"Error fetching {title}")
+                    logging.getLogger().exception(f"Error fetching {title}")
                 finally:
                     current_progress.remove_task(task_id)
                     total_progress.advance(total_progress_task_id)

@@ -90,7 +90,7 @@ class EzMangaModule(BaseModule):
 
         chapters = []
 
-        async def get_chapters(cursor: str | None):
+        async def get_chapters(cursor: str | None) -> self.MangaChapterResponse:
             return await self.get_json(
                 f"/api/v2/series/{slug_id}/chapters",
                 params={"limit": 100, "sort": "asc"}
@@ -102,7 +102,7 @@ class EzMangaModule(BaseModule):
         cursor = None
 
         while has_more:
-            chapters_json: self.MangaChapterResponse = await get_chapters(cursor)
+            chapters_json = await get_chapters(cursor)
 
             for data in dict_get_recursive(chapters_json, "data", default=[]):
                 if dict_get_recursive(data, "isFree", default=True):
