@@ -356,7 +356,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         self._session = create_client(
             self._BASE_API_URL,
             additional_middlewares=[MangaDotNetLoginMiddleware(config, self)],
-            headers={"Origin": self._BASE_API_URL},
         )
         self._tus_chunk_size = config.upload_chunk_size
 

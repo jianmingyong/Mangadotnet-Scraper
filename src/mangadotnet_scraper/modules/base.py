@@ -60,7 +60,8 @@ class BaseModule(AbstractAsyncContextManager):
     base_url: Final[str]
     base_api_url: Final[str]
 
-    additional_headers: Final[Mapping[str, str] | None]
+    user_agent: Final[str | None]
+    additional_headers: Final[Mapping[str, str]]
 
     fetch_concurrency: int
     download_concurrency: int
@@ -75,7 +76,8 @@ class BaseModule(AbstractAsyncContextManager):
         display_name: str,
         base_url: str,
         base_api_url: str | None = None,
-        additional_headers: Mapping[str, str] | None = None,
+        user_agent: str | None = None,
+        additional_headers: Mapping[str, str] = {},
     ) -> None:
         self.config = config
 
@@ -85,6 +87,7 @@ class BaseModule(AbstractAsyncContextManager):
         self.base_url = base_url
         self.base_api_url = base_api_url if base_api_url is not None else base_url
 
+        self.user_agent = user_agent
         self.additional_headers = additional_headers
 
         self.fetch_concurrency = config.fetch_concurrency
@@ -104,12 +107,7 @@ class BaseModule(AbstractAsyncContextManager):
         await self.close()
 
     async def initialize(self) -> None:
-        headers = {"Origin": self.base_url}
-
-        if self.additional_headers is not None:
-            headers.update(self.additional_headers)
-
-        self.session = create_client(base_url=self.base_api_url, headers=headers)
+        self.session = create_client(base_url=self.base_api_url, user_agent=self.user_agent, additional_headers=self.additional_headers)
 
     async def close(self) -> None:
         await self.session.close()

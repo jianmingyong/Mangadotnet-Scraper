@@ -74,7 +74,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                     mangadotnet_id  INTEGER DEFAULT NULL,
                     last_checked    INTEGER DEFAULT NULL,
                     manual_override INTEGER NOT NULL DEFAULT 0,
-                    half_chapters   INTEGER NOT NULL DEFAULT 0,
+                    skip_upload     INTEGER NOT NULL DEFAULT 0,
                     CONSTRAINT module_manga_unique_manga_id UNIQUE (module_id, manga_id)
                 );
 
@@ -122,6 +122,16 @@ class MangaDotNetScraperData(AbstractContextManager):
             for table_name, version in cursor:
                 table_version[table_name] = version
 
+            if table_version.get("module_manga", 1) < 7:
+                connection.executescript(
+                    """
+                    ALTER TABLE module_manga ADD COLUMN skip_upload INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE module_manga DROP COLUMN half_chapters;
+
+                    UPDATE db_version SET version = 7 WHERE table_name = "module_manga";
+                    """
+                )
+
     def close(self) -> None:
         self._connection.close()
 
@@ -164,7 +174,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters
+                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                 FROM module_manga
                 WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
                 ORDER BY title;
@@ -175,7 +185,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters
+                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                 FROM module_manga
                 WHERE module_id = {module_id}
                 ORDER BY title;
@@ -353,9 +363,10 @@ class MangaDotNetScraperData(AbstractContextManager):
             SELECT COUNT(*)
             FROM module_manga
             WHERE
-                module_id = {module_id} AND
-                rowid IN (SELECT DISTINCT manga_rowid FROM module_chapter WHERE uploaded = 0 AND skip_upload = 0) AND
-                mangadotnet_id IS NOT NULL;
+                module_id = {module_id}
+                AND rowid IN (SELECT DISTINCT manga_rowid FROM module_chapter WHERE uploaded = 0 AND skip_upload = 0)
+                AND mangadotnet_id IS NOT NULL
+                AND skip_upload = 0;
             """
         )
 
@@ -364,9 +375,10 @@ class MangaDotNetScraperData(AbstractContextManager):
             SELECT rowid, manga_id, link, title, mangadotnet_id
             FROM module_manga
             WHERE
-                module_id = {module_id} AND
-                rowid IN (SELECT DISTINCT manga_rowid FROM module_chapter WHERE uploaded = 0 AND skip_upload = 0) AND
-                mangadotnet_id IS NOT NULL
+                module_id = {module_id}
+                AND rowid IN (SELECT DISTINCT manga_rowid FROM module_chapter WHERE uploaded = 0 AND skip_upload = 0)
+                AND mangadotnet_id IS NOT NULL
+                AND skip_upload = 0
             ORDER BY module_id, title;
             """
         )

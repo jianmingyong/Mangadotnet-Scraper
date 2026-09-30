@@ -40,7 +40,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
     _session: Final[ClientSession]
 
     def __init__(self) -> None:
-        self._session = create_client(self._BASE_API_URL, headers={"Origin": self._BASE_API_URL})
+        self._session = create_client(self._BASE_API_URL)
 
     async def __aexit__(
         self,

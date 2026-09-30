@@ -287,8 +287,7 @@ async def fetch_module_listing_details(
             title: str,
             mangabaka_id: int | None,
             mangadotnet_id: int | None,
-            manual_override: bool,
-            half_chapters: bool
+            manual_override: bool
         ) -> None:
             async with semaphore:
                 task_id = current_progress.add_task(title)
@@ -299,25 +298,14 @@ async def fetch_module_listing_details(
                     chapters: list[ModuleChapter] = []
 
                     for chapter in detail.chapters:
-                        chapter_number = chapter.chapter_number
-                        chapter_title = chapter.title
-
-                        if chapter.type == "chapter" and chapter_number is not None and half_chapters:
-                            if chapter_number % 2 == 0:
-                                chapter_number = (chapter_number // 2) + 0.2
-                            else:
-                                chapter_number = ((chapter_number + 1) // 2) + 0.1
-
-                            chapter_title = f"Chapter {chapter_number:.1f} ({chapter.chapter_number})"
-
                         chapters.append(
                             ModuleChapter(
                                 chapter.language,
                                 chapter.group,
                                 chapter.type,
-                                chapter_number,
+                                chapter.chapter_number,
                                 chapter.volume_number,
-                                chapter_title,
+                                chapter.title,
                                 chapter.link,
                                 chapter.chapter_id,
                                 False,
@@ -407,10 +395,10 @@ async def fetch_module_listing_details(
 
         try:
             async with asyncio.TaskGroup() as group:
-                for rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters in listing:
+                for rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override in listing:
                     group.create_task(
                         fetch_manga_detail_task(
-                            rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters
+                            rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
                         )
                     )
 

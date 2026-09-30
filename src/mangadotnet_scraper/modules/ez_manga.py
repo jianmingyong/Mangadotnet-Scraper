@@ -17,7 +17,7 @@ class EzMangaModule(BaseModule):
             "Ezmanga",
             self._BASE_URL,
             self._BASE_API_URL,
-            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0"},
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0"
         )
 
     class MangaListingResponse(TypedDict):
