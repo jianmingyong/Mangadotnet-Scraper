@@ -4,7 +4,6 @@ from collections.abc import Callable, Coroutine, Iterable, Mapping
 from functools import wraps
 from typing import Final
 
-from aiodns.error import DNSError
 from aiohttp import (
     AsyncResolver,
     ClientConnectionError,
@@ -70,9 +69,6 @@ def retryable_client_session[**P, R](
         for retry in range(max_retry):
             try:
                 return await async_func(*args, **kwargs)
-            except DNSError:
-                # DNS Resolve error
-                await sleep(retry_wait * (retry + 1))
             except ClientConnectionError:
                 # Connect failed or disconnect from internet.
                 await sleep(retry_wait * (retry + 1))
