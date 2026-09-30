@@ -1,6 +1,6 @@
 from abc import ABC
 from asyncio import Lock, sleep
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Callable, Coroutine, Iterable, Mapping
 from functools import wraps
 from typing import Final
 
@@ -21,29 +21,50 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 
 
 def create_client(
-    base_url: str | None = None, additional_middlewares: Iterable[ClientMiddlewareType] = [], **kwargs
+    base_url: str | None = None,
+    user_agent: str | None = None,
+    additional_headers: Mapping[str, str] = {},
+    additional_middlewares: Iterable[ClientMiddlewareType] = [],
+    **kwargs,
 ) -> ClientSession:
+    headers = {}
+    headers.update(additional_headers)
+
+    if base_url is not None:
+        headers.update({"Origin": base_url})
+
+    if user_agent is not None:
+        headers.update({"User-Agent": user_agent})
+
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, ttl_dns_cache=3600)
     return ClientSession(
         base_url,
         connector=connector,
+        headers=headers,
         middlewares=[
             RetryableHandlerMiddleware(),
             *additional_middlewares,
-            CloudflareMiddleware(),
+            CloudflareMiddleware(user_agent),
         ],
         **kwargs,
     )
 
 
+def default_retryable_status(error: ClientResponseError) -> bool:
+    if error.headers is not None and error.headers.get("cf-mitigated") == "challenge":
+        return True
+
+    return error.status == 408 or error.status == 504
+
+
 def retryable_client_session[**P, R](
     async_func: Callable[P, Coroutine[None, None, R]],
     max_retry: int = 5,
-    retryable_status: Callable[[ClientResponseError], bool] = lambda x: (
-        x.headers is not None and x.headers.get("cf-mitigated") == "challenge"
-    ),
+    retry_wait: int = 2,
+    retryable_status: Callable[[ClientResponseError], bool] = default_retryable_status,
 ) -> Callable[P, Coroutine[None, None, R]]:
+
     @wraps(async_func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         for retry in range(max_retry):
@@ -51,14 +72,14 @@ def retryable_client_session[**P, R](
                 return await async_func(*args, **kwargs)
             except DNSError:
                 # DNS Resolve error
-                await sleep(2 * (retry + 1))
+                await sleep(retry_wait * (retry + 1))
             except ClientConnectionError:
                 # Connect failed or disconnect from internet.
-                await sleep(2 * (retry + 1))
+                await sleep(retry_wait * (retry + 1))
             except ClientResponseError as error:
                 # Client received non ok status.
                 if retryable_status(error):
-                    await sleep(2 * (retry + 1))
+                    await sleep(retry_wait * (retry + 1))
                 else:
                     raise
 
@@ -73,33 +94,35 @@ class Middleware(ABC):
 
 
 class RetryableHandlerMiddleware(Middleware):
-    _REQUEST_TIMEOUT_STATUS_CODE = 408
     _TOO_MANY_REQUEST_STATUS_CODE = 429
-    _GATEWAY_TIMEOUT_STATUS_CODE = 504
-
     _RETRY_AFTER_HEADER = "Retry-After"
 
-    _max_retry: Final[int]
+    _lock: Final[Lock]
+    _retry_wait_duration: Final[int]
 
-    def __init__(self, max_retry: int = 5) -> None:
-        self._max_retry = max_retry
+    def __init__(self, retry_wait_duration: int = 60) -> None:
+        self._lock = Lock()
+        self._retry_wait_duration = retry_wait_duration
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        for retry in range(self._max_retry):
-            response = await handler(request)
+        response = await handler(request)
 
-            if response.status == self._REQUEST_TIMEOUT_STATUS_CODE:
-                # Request timed out. Safe to try this again.
-                await sleep(2 * (retry + 1))
-            elif response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
-                # Rate limited. Try again after X seconds from _RETRY_AFTER_HEADER.
-                retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
-                await sleep(int(retry_timer) if retry_timer is not None else (2 * (retry + 1)))
-            elif response.status == self._GATEWAY_TIMEOUT_STATUS_CODE:
-                # Gateway timed out. Safe to try this again.
-                await sleep(2 * (retry + 1))
-            else:
-                break
+        if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
+            # Rate limited. Try again after X seconds from _RETRY_AFTER_HEADER.
+            async with self._lock:
+                response = await handler(request)
+
+                if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
+                    retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
+
+                    if retry_timer is None or (retry_timer is not None and not retry_timer.isnumeric()):
+                        retry_timer = self._retry_wait_duration
+                    else:
+                        retry_timer = int(retry_timer)
+
+                    await sleep(retry_timer)
+
+                    return await handler(request)
 
         return response
 
@@ -108,11 +131,11 @@ class CloudflareMiddleware(Middleware):
     _CLOUDFLARE_COOKIE_NAME = "cf_clearance"
 
     _user_agent: str | None
-    _cookies: dict[str, str]
-    _lock: Lock
+    _cookies: Final[dict[str, str]]
+    _lock: Final[Lock]
 
-    def __init__(self) -> None:
-        self._user_agent = None
+    def __init__(self, user_agent: str | None = None) -> None:
+        self._user_agent = user_agent
         self._cookies = {}
         self._lock = Lock()
 
@@ -135,7 +158,7 @@ class CloudflareMiddleware(Middleware):
                 response = await update_and_request()
 
                 if response.headers.get("cf-mitigated") == "challenge":
-                    data = await get_cloudflare_cookies(str(request.url))
+                    data = await get_cloudflare_cookies(str(request.url), self._user_agent)
 
                     if data is not None:
                         self._user_agent = data[0]

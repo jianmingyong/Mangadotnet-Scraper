@@ -164,7 +164,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
+                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters
                 FROM module_manga
                 WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
                 ORDER BY title;
@@ -175,7 +175,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
+                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override, half_chapters
                 FROM module_manga
                 WHERE module_id = {module_id}
                 ORDER BY title;
