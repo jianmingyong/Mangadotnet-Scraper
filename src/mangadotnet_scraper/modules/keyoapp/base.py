@@ -117,7 +117,7 @@ class KeyoAppTemplate(BaseModule):
                 if chapter_title is None:
                     continue
 
-                title_match = re.search("Chapter (\\d+|\\d+\\.\\d+)", chapter_title)
+                title_match = re.search("Chapter (\\d+\\.\\d+|\\d+)", chapter_title)
 
                 if title_match is None:
                     continue

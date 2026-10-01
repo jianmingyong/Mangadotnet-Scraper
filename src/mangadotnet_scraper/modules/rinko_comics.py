@@ -112,7 +112,7 @@ class RinkoComicsModule(BaseModule):
                 if chapter_title is None:
                     continue
 
-                title_match = re.search("Chapter (\\d+|\\d+\\.\\d+)", cast(str, chapter_title))
+                title_match = re.search("Chapter (\\d+\\.\\d+|\\d+)", cast(str, chapter_title))
 
                 if title_match:
                     chapter_number = float(title_match[1])
