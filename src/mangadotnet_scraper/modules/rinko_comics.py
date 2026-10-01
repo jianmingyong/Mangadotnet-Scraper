@@ -11,10 +11,8 @@ from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
 class RinkoComicsModule(BaseModule):
-    _BASE_URL = "https://rinkocomics.com"
-
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        super().__init__(config, "rinko_comics", "Rinko Comics", self._BASE_URL)
+        super().__init__(config, "rinko_comics", "Rinko Comics", "https://rinkocomics.com")
 
     @override
     async def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:

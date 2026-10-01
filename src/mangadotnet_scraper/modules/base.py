@@ -3,7 +3,7 @@ from collections.abc import AsyncIterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Final, Literal, Self
+from typing import Any, Final, Literal, NotRequired, Required, Self, TypedDict
 
 from aiohttp import ClientSession
 from aiohttp.typedefs import Query
@@ -49,6 +49,16 @@ class MangaPage:
 class MangaImage:
     filename: str
     data: bytes
+
+
+class BaseModuleArgs(TypedDict):
+    config: Required[MangaDotNetScraperConfig]
+    module_id: Required[str]
+    display_name: Required[str]
+    base_url: Required[str]
+    base_api_url: NotRequired[str | None]
+    user_agent: NotRequired[str | None]
+    additional_headers: NotRequired[Mapping[str, str]]
 
 
 class BaseModule(AbstractAsyncContextManager):
@@ -107,7 +117,9 @@ class BaseModule(AbstractAsyncContextManager):
         await self.close()
 
     async def initialize(self) -> None:
-        self.session = create_client(base_url=self.base_api_url, user_agent=self.user_agent, additional_headers=self.additional_headers)
+        self.session = create_client(
+            base_url=self.base_api_url, user_agent=self.user_agent, additional_headers=self.additional_headers
+        )
 
     async def close(self) -> None:
         await self.session.close()

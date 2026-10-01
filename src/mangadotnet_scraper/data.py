@@ -78,7 +78,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                     CONSTRAINT module_manga_unique_manga_id UNIQUE (module_id, manga_id)
                 );
 
-                CREATE INDEX IF NOT EXISTS module_manga_index_title ON module_manga (module_id, title ASC);
+                CREATE INDEX IF NOT EXISTS module_manga_index_title ON module_manga (module_id, title);
 
                 CREATE TABLE IF NOT EXISTS module_chapter
                 (
