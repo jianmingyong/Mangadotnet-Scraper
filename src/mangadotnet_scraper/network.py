@@ -1,3 +1,4 @@
+import logging
 from abc import ABC
 from asyncio import Lock, sleep
 from collections.abc import Callable, Coroutine, Iterable, Mapping
@@ -60,7 +61,7 @@ def default_retryable_status(error: ClientResponseError) -> bool:
 def retryable_client_session[**P, R](
     async_func: Callable[P, Coroutine[None, None, R]],
     max_retry: int = 5,
-    retry_wait: int = 2,
+    retry_wait_duration: int = 5,
     retryable_status: Callable[[ClientResponseError], bool] = default_retryable_status,
 ) -> Callable[P, Coroutine[None, None, R]]:
 
@@ -70,12 +71,14 @@ def retryable_client_session[**P, R](
             try:
                 return await async_func(*args, **kwargs)
             except ClientConnectionError:
-                # Connect failed or disconnect from internet.
-                await sleep(retry_wait * (retry + 1))
+                logging.getLogger(__name__).error(f"Client failed to connect. Retry attempt {retry + 1}/{max_retry}")
+                await sleep(retry_wait_duration * (retry + 1))
             except ClientResponseError as error:
-                # Client received non ok status.
                 if retryable_status(error):
-                    await sleep(retry_wait * (retry + 1))
+                    logging.getLogger(__name__).error(
+                        f"Client response with {error.status} ({error.message}). Retry attempt {retry + 1}/{max_retry}"
+                    )
+                    await sleep(retry_wait_duration * (retry + 1))
                 else:
                     raise
 
@@ -93,12 +96,12 @@ class RetryableHandlerMiddleware(Middleware):
     _TOO_MANY_REQUEST_STATUS_CODE = 429
     _RETRY_AFTER_HEADER = "Retry-After"
 
-    _lock: Final[Lock]
     _retry_wait_duration: Final[int]
+    _lock: Final[Lock]
 
     def __init__(self, retry_wait_duration: int = 60) -> None:
-        self._lock = Lock()
         self._retry_wait_duration = retry_wait_duration
+        self._lock = Lock()
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         response = await handler(request)

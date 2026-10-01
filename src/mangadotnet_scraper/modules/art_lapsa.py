@@ -3,12 +3,14 @@ import re
 from collections.abc import AsyncIterable
 from typing import cast, override
 
+from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Browser, Error
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
+from mangadotnet_scraper.modules.error import FetchError, NotFoundError
 from mangadotnet_scraper.network import retryable_client_session
 from mangadotnet_scraper.utilities import clean_string
 
@@ -54,58 +56,68 @@ class ArtLapsaModule(BaseModule):
 
     @override
     async def fetch_manga_detail(self, manga_id: str, link: str) -> MangaDetail:
-        html = await self.get_html(link)
-        soup = BeautifulSoup(html, "html.parser")
-
-        title_element = soup.find("h1")
-        title = clean_string(title_element.text) if title_element else ""
-
-        alt_titles_element = soup.find_all("li", attrs={"class": "select-all"})
-        alt_titles = [clean_string(e.text) for e in alt_titles_element]
-
-        def is_chapter_link_element(tag: Tag) -> bool:
-            return (
-                tag.name == "a"
-                and tag.has_attr("href")
-                and re.compile("/read/").search(str(tag.attrs["href"])) is not None
-                and tag.find_parent("div", attrs={"id": "chapters"}) is not None
-            )
-
-        chapter_elements = soup.find_all(is_chapter_link_element)
-        chapters = []
-
-        for chapter_element in chapter_elements:
-            chapter_title = chapter_element.attrs.get("title")
-            
-            if chapter_title is None:
-                continue
-
-            title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(cast(str, chapter_title))
-
-            if title_match:
-                chapter_number = float(title_match[1])
+        try:
+            html = await self.get_html(link)
+        except ClientResponseError as error:
+            if error.code == 404:
+                raise NotFoundError from error
             else:
-                continue
+                raise FetchError from error
 
-            chapter_link = cast(str, chapter_element.attrs.get("href"))
+        try:
+            soup = BeautifulSoup(html, "html.parser")
 
-            if chapter_link is None:
-                continue
+            title_element = soup.find("h1")
+            title = clean_string(title_element.text) if title_element else ""
 
-            chapters.append(
-                MangaChapter(
-                    "en",
-                    self.display_name,
-                    "chapter",
-                    chapter_number,
-                    None,
-                    f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
-                    f"{self._BASE_URL}{chapter_link}",
-                    chapter_link[chapter_link.rfind("/") + 1 :],
+            alt_titles_element = soup.find_all("li", attrs={"class": "select-all"})
+            alt_titles = [clean_string(e.text) for e in alt_titles_element]
+
+            def is_chapter_link_element(tag: Tag) -> bool:
+                return (
+                    tag.name == "a"
+                    and tag.has_attr("href")
+                    and re.compile("/read/").search(str(tag.attrs["href"])) is not None
+                    and tag.find_parent("div", attrs={"id": "chapters"}) is not None
                 )
-            )
 
-        return MangaDetail(title, alt_titles, chapters)
+            chapter_elements = soup.find_all(is_chapter_link_element)
+            chapters = []
+
+            for chapter_element in chapter_elements:
+                chapter_title = chapter_element.attrs.get("title")
+                
+                if chapter_title is None:
+                    continue
+
+                title_match = re.compile("Chapter (\\d+|\\d+\\.\\d+)").search(cast(str, chapter_title))
+
+                if title_match:
+                    chapter_number = float(title_match[1])
+                else:
+                    continue
+
+                chapter_link = cast(str, chapter_element.attrs.get("href"))
+
+                if chapter_link is None:
+                    continue
+
+                chapters.append(
+                    MangaChapter(
+                        "en",
+                        self.display_name,
+                        "chapter",
+                        chapter_number,
+                        None,
+                        f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
+                        f"{self._BASE_URL}{chapter_link}",
+                        chapter_link[chapter_link.rfind("/") + 1 :],
+                    )
+                )
+
+            return MangaDetail(title, alt_titles, chapters)
+        except Exception as error:
+            raise FetchError from error
 
     @override
     async def fetch_manga_pages(
