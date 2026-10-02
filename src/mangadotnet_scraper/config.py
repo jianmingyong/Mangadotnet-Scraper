@@ -66,7 +66,9 @@ class MangaDotNetScraperConfig:
 
     @property
     def download_concurrency(self) -> int:
-        return self._return_or_default(self._data.get("download_concurrency"), 12)
+        return self._return_or_default(
+            self._data.get("download_concurrency"), 12
+        )
 
     @property
     def download_max_retry(self) -> int:
@@ -74,15 +76,21 @@ class MangaDotNetScraperConfig:
 
     @property
     def upload_concurrency(self) -> int:
-        return self._return_or_default(self._data.get("upload_concurrency"), 10)
+        return self._return_or_default(
+            self._data.get("upload_concurrency"), 10
+        )
 
     @property
     def upload_chunk_size(self) -> int:
-        return self._return_or_default(self._data.get("upload_chunk_size"), 4 * 1024 * 1024)
+        return self._return_or_default(
+            self._data.get("upload_chunk_size"), 4 * 1024 * 1024
+        )
 
     @property
     def upload_verify_duration(self) -> int:
-        return self._return_or_default(self._data.get("upload_verify_duration"), 60)
+        return self._return_or_default(
+            self._data.get("upload_verify_duration"), 60
+        )
 
     def load_config(self) -> None:
         try:
