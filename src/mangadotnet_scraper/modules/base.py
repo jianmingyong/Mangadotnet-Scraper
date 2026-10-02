@@ -63,7 +63,7 @@ class MangaImage:
     data: bytes
 
 
-class BaseModuleArgs(TypedDict, closed=True):
+class BaseModuleArgs(TypedDict):
     module_id: Required[str]
     display_name: Required[str]
 
