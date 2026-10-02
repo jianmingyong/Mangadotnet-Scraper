@@ -1,5 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.keyoapp import KeyoAppTemplate
+from mangadotnet_scraper.modules.keyoapp.base import KeyoAppTemplate
 
 
 class RitharScansModule(KeyoAppTemplate):

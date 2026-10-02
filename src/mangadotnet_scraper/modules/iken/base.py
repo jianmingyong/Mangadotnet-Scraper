@@ -1,7 +1,6 @@
 from collections.abc import AsyncIterable, Sequence
-from typing import TypedDict, override
+from typing import ReadOnly, TypedDict, override
 
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import (
     BaseModule,
     MangaChapter,
@@ -12,36 +11,63 @@ from mangadotnet_scraper.modules.base import (
 from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
-class NyxScansModule(BaseModule):
-    _BASE_URL = "https://nyxscans.com"
-    _BASE_API_URL = "https://api.nyxscans.com"
+class PostsResponse(TypedDict):
+    posts: ReadOnly[Sequence[PostsResponsePost]]
+    totalCount: ReadOnly[int]
 
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        super().__init__(
-            config,
-            module_id="nyx_scans",
-            display_name="Nyx Scans",
-            base_url=self._BASE_URL,
-            base_api_url=self._BASE_API_URL,
-        )
 
-    @override
-    async def initialize(self) -> None:
-        await super().initialize()
-        self.fetch_concurrency = 4
+class PostsResponsePost(TypedDict):
+    id: ReadOnly[int]
+    slug: ReadOnly[str]
+    postTitle: ReadOnly[str]
 
-    class PostsResponse(TypedDict):
-        posts: Sequence[NyxScansModule.PostsResponsePost]
-        totalCount: int
 
-    class PostsResponsePost(TypedDict):
-        id: int
-        slug: str
-        postTitle: str
+class PostResponse(TypedDict):
+    post: ReadOnly[PostResponseData]
 
+
+class PostResponseData(TypedDict):
+    postTitle: ReadOnly[str]
+    alternativeTitles: ReadOnly[str]
+
+
+class ChaptersResponse(TypedDict):
+    post: ReadOnly[ChaptersResponsePost]
+    totalChapterCount: ReadOnly[int]
+
+
+class ChaptersResponsePost(TypedDict):
+    chapters: ReadOnly[Sequence[ChaptersResponsePostChapter]]
+
+
+class ChaptersResponsePostChapter(TypedDict):
+    id: ReadOnly[int]
+    slug: ReadOnly[str]
+    number: ReadOnly[float]
+    title: ReadOnly[str | None]
+    isLocked: ReadOnly[bool]
+
+
+class ChapterResponse(TypedDict):
+    chapter: ReadOnly[ChapterResponseObject]
+
+
+class ChapterResponseObject(TypedDict):
+    images: ReadOnly[Sequence[ChapterResponseObjectImages]]
+
+
+class ChapterResponseObjectImages(TypedDict):
+    id: ReadOnly[int]
+    url: ReadOnly[str]
+    width: ReadOnly[int]
+    height: ReadOnly[int]
+    order: ReadOnly[int]
+
+
+class IkenTemplate(BaseModule):
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        async def fetch_listing(page: int = 1) -> self.PostsResponse:
+        async def fetch_listing(page: int = 1) -> PostsResponse:
             return await self.get_json(
                 "/api/posts",
                 params={
@@ -69,7 +95,7 @@ class NyxScansModule(BaseModule):
                 yield MangaListing(
                     str(id),
                     clean_string(title),
-                    f"{self._BASE_URL}/series/{clean_string(slug)}",
+                    f"{self.base_url}/series/{clean_string(slug)}",
                 )
 
             has_next_page = page * 100 < dict_get_recursive(
@@ -77,32 +103,11 @@ class NyxScansModule(BaseModule):
             )
             page += 1
 
-    class PostResponse(TypedDict):
-        post: NyxScansModule.PostResponsePost
-
-    class PostResponsePost(TypedDict):
-        postTitle: str
-        alternativeTitles: str
-
-    class ChaptersResponse(TypedDict):
-        post: NyxScansModule.ChaptersResponsePost
-
-    class ChaptersResponsePost(TypedDict):
-        chapters: Sequence[NyxScansModule.ChaptersResponsePostChapter]
-
-    class ChaptersResponsePostChapter(TypedDict):
-        id: int
-        slug: str
-        number: float
-        title: str
-        isLocked: bool
-
     @override
     async def on_fetch_manga_detail(
         self, manga_id: str, link: str
     ) -> MangaDetail:
-        slug = link[link.rfind("/") + 1 :]
-        json: self.PostResponse = await self.get_json(
+        json: PostResponse = await self.get_json(
             "/api/post", params={"postId": manga_id}
         )
 
@@ -112,7 +117,7 @@ class NyxScansModule(BaseModule):
         ).splitlines()
 
         chapters = []
-        chapters_json: self.ChaptersResponse = await self.get_json(
+        chapters_json: ChaptersResponse = await self.get_json(
             "/api/chapters", params={"postId": manga_id}
         )
 
@@ -145,25 +150,12 @@ class NyxScansModule(BaseModule):
                     number,
                     None,
                     chapter_title,
-                    f"{self._BASE_URL}/{slug}/{chapter_slug}",
+                    f"{link}/{chapter_slug}",
                     str(chapter_id),
                 )
             )
 
         return MangaDetail(title, alt_titles, chapters)
-
-    class ChapterResponse(TypedDict):
-        chapter: NyxScansModule.ChapterResponseObject
-
-    class ChapterResponseObject(TypedDict):
-        images: Sequence[NyxScansModule.ChapterResponseObjectImages]
-
-    class ChapterResponseObjectImages(TypedDict):
-        id: int
-        url: str
-        width: int
-        height: int
-        order: int
 
     @override
     async def on_fetch_manga_pages(
@@ -172,9 +164,9 @@ class NyxScansModule(BaseModule):
         manga_link: str,
         chapter_id: str,
         chapter_link: str,
-    ) -> list[MangaPage]:
+    ) -> Sequence[MangaPage]:
         manga_pages = []
-        pages: self.ChapterResponse = await self.get_json(
+        pages: ChapterResponse = await self.get_json(
             "/api/chapter", params={"chapterId": chapter_id}
         )
 

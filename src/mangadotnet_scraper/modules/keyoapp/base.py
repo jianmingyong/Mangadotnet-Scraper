@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Sequence
 from typing import Unpack, cast, override
 
 from aiohttp import ClientResponseError
@@ -169,7 +169,7 @@ class KeyoAppTemplate(BaseModule):
         manga_link: str,
         chapter_id: str,
         chapter_link: str,
-    ) -> list[MangaPage]:
+    ) -> Sequence[MangaPage]:
         html = await self.get_html(chapter_link)
         soup = BeautifulSoup(html, "html.parser")
 
