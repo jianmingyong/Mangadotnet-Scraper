@@ -3,20 +3,20 @@ import sys
 from typing import cast
 
 from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, Error
+from playwright.async_api import Browser, Error, Response
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.camoufox_add_init_script.add_init_script import (
     get_addon_path,
 )
 from playwright_captcha.utils.exceptions import (
-    CaptchaApplyingError,
-    CaptchaDataDetectionError,
     CaptchaDetectionError,
     CaptchaSolvingError,
 )
 
 
-def create_browser(headless: bool | str = True, **launch_options) -> AsyncCamoufox:
+def create_browser(
+    headless: bool | str = True, **launch_options
+) -> AsyncCamoufox:
     os = sys.platform
 
     if os == "win32" or os == "cygwin":
@@ -40,41 +40,50 @@ def create_browser(headless: bool | str = True, **launch_options) -> AsyncCamouf
     )
 
 
-async def get_cloudflare_cookies(url: str, user_agent: str | None = None) -> tuple[str, str] | None:
+async def get_cloudflare_cookies(
+    url: str, user_agent: str | None = None
+) -> tuple[str, str] | None:
     try:
         async with (
             create_browser() as browser,
-            await cast(Browser, browser).new_context(user_agent=user_agent) as context,
+            await cast(Browser, browser).new_context(
+                user_agent=user_agent
+            ) as context,
         ):
             page = await context.new_page()
 
-            async with ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver:
-                await page.goto(url, wait_until="domcontentloaded")
+            async with ClickSolver(
+                framework=FrameworkType.CAMOUFOX, page=page
+            ) as solver:
+                response = cast(
+                    Response,
+                    await page.goto(url),
+                )
 
                 if user_agent is None:
                     user_agent = await page.evaluate("navigator.userAgent")
 
-                try:
-                    await page.wait_for_selector('input[name="cf-turnstile-response"]', state="hidden")
-                except TimeoutError:
-                    logging.getLogger(__name__).exception("Cloudflare captcha does not exists")
-                    return None
+                if await response.header_value("cf-mitigated") == "challenge":
+                    try:
+                        await solver.solve_captcha(
+                            captcha_container=page,
+                            captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                        )
+                    except (
+                        CaptchaDetectionError,
+                        CaptchaSolvingError,
+                    ):
+                        logging.getLogger(__name__).exception(
+                            "Failed to solve cloudflare captcha"
+                        )
+                        return None
 
-                try:
-                    await solver.solve_captcha(
-                        captcha_container=page,
-                        captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                    await page.wait_for_load_state("domcontentloaded")
+                elif not response.ok:
+                    logging.getLogger(__name__).debug(
+                        f"Failed to get cloudflare cookies due to request {response.status} ({response.status_text})"
                     )
-                except (
-                    CaptchaDetectionError,
-                    CaptchaDataDetectionError,
-                    CaptchaSolvingError,
-                    CaptchaApplyingError,
-                ):
-                    logging.getLogger(__name__).exception("Failed to solve Cloudflare captcha")
                     return None
-
-                await page.wait_for_load_state("domcontentloaded")
 
             cookies = await context.cookies(url)
             cookie_value = None
@@ -89,5 +98,7 @@ async def get_cloudflare_cookies(url: str, user_agent: str | None = None) -> tup
 
         return user_agent, cookie_value
     except Error:
-        logging.getLogger(__name__).exception("Camoufox crashed")
+        logging.getLogger(__name__).exception(
+            "Failed to get cloudflare cookies due to camoufox error"
+        )
         return None

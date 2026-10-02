@@ -43,7 +43,7 @@ def create_client(
         connector=connector,
         headers=headers,
         middlewares=[
-            RetryableHandlerMiddleware(),
+            RateLimitedMiddleware(),
             *additional_middlewares,
             CloudflareMiddleware(user_agent),
         ],
@@ -52,7 +52,10 @@ def create_client(
 
 
 def default_retryable_status(error: ClientResponseError) -> bool:
-    if error.headers is not None and error.headers.get("cf-mitigated") == "challenge":
+    if (
+        error.headers is not None
+        and error.headers.get("cf-mitigated") == "challenge"
+    ):
         return True
 
     return error.status == 408 or error.status == 504
@@ -62,7 +65,9 @@ def retryable_client_session[**P, R](
     async_func: Callable[P, Coroutine[None, None, R]],
     max_retry: int = 5,
     retry_wait_duration: int = 5,
-    retryable_status: Callable[[ClientResponseError], bool] = default_retryable_status,
+    retryable_status: Callable[
+        [ClientResponseError], bool
+    ] = default_retryable_status,
 ) -> Callable[P, Coroutine[None, None, R]]:
 
     @wraps(async_func)
@@ -71,7 +76,9 @@ def retryable_client_session[**P, R](
             try:
                 return await async_func(*args, **kwargs)
             except ClientConnectionError:
-                logging.getLogger(__name__).error(f"Client failed to connect. Retry attempt {retry + 1}/{max_retry}")
+                logging.getLogger(__name__).error(
+                    f"Client failed to connect. Retry attempt {retry + 1}/{max_retry}"
+                )
                 await sleep(retry_wait_duration * (retry + 1))
             except ClientResponseError as error:
                 if retryable_status(error):
@@ -88,11 +95,13 @@ def retryable_client_session[**P, R](
 
 
 class Middleware(ABC):
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+    async def __call__(
+        self, request: ClientRequest, handler: ClientHandlerType
+    ) -> ClientResponse:
         return await handler(request)
 
 
-class RetryableHandlerMiddleware(Middleware):
+class RateLimitedMiddleware(Middleware):
     _TOO_MANY_REQUEST_STATUS_CODE = 429
     _RETRY_AFTER_HEADER = "Retry-After"
 
@@ -103,21 +112,30 @@ class RetryableHandlerMiddleware(Middleware):
         self._retry_wait_duration = retry_wait_duration
         self._lock = Lock()
 
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+    async def __call__(
+        self, request: ClientRequest, handler: ClientHandlerType
+    ) -> ClientResponse:
         response = await handler(request)
 
         if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
-            # Rate limited. Try again after X seconds from _RETRY_AFTER_HEADER.
             async with self._lock:
                 response = await handler(request)
 
                 if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
-                    retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
+                    retry_timer = response.headers.get(
+                        self._RETRY_AFTER_HEADER
+                    )
 
-                    if retry_timer is None or (retry_timer is not None and not retry_timer.isnumeric()):
+                    if retry_timer is None or (
+                        retry_timer is not None and not retry_timer.isnumeric()
+                    ):
                         retry_timer = self._retry_wait_duration
                     else:
                         retry_timer = int(retry_timer)
+
+                    logging.getLogger(__name__).debug(
+                        f"Request rate limited. Retrying after {retry_timer} seconds..."
+                    )
 
                     await sleep(retry_timer)
 
@@ -138,7 +156,9 @@ class CloudflareMiddleware(Middleware):
         self._cookies = {}
         self._lock = Lock()
 
-    async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
+    async def __call__(
+        self, request: ClientRequest, handler: ClientHandlerType
+    ) -> ClientResponse:
         async def update_and_request() -> ClientResponse:
             if self._user_agent is not None:
                 request.headers.update({"User-Agent": self._user_agent})
@@ -157,7 +177,13 @@ class CloudflareMiddleware(Middleware):
                 response = await update_and_request()
 
                 if response.headers.get("cf-mitigated") == "challenge":
-                    data = await get_cloudflare_cookies(str(request.url), self._user_agent)
+                    logging.getLogger(__name__).debug(
+                        "Request requires cloudflare challenge. Attempting to get cloudflare cookies..."
+                    )
+
+                    data = await get_cloudflare_cookies(
+                        str(request.url), self._user_agent
+                    )
 
                     if data is not None:
                         self._user_agent = data[0]

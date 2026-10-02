@@ -1,4 +1,4 @@
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from itertools import groupby
@@ -14,10 +14,10 @@ from mangadotnet_scraper.config import MangaDotNetScraperConfig
 @dataclass(frozen=True)
 class ModuleManga:
     title: str
-    alt_titles: list[str]
+    alt_titles: Sequence[str]
     mangabaka_id: int | None
     mangadotnet_id: int | None
-    chapters: list[ModuleChapter]
+    chapters: Sequence[ModuleChapter]
 
 
 @dataclass
@@ -116,7 +116,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                 """
             )
 
-            cursor = connection.execute("SELECT table_name, version FROM db_version;")
+            cursor = connection.execute(
+                "SELECT table_name, version FROM db_version;"
+            )
             table_version: dict[str, int] = {}
 
             for table_name, version in cursor:
@@ -141,7 +143,9 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         for t_string in sql:
             if isinstance(t_string, Interpolation):
-                if isinstance(t_string.value, Collection) and not isinstance(t_string.value, str):
+                if isinstance(t_string.value, Collection) and not isinstance(
+                    t_string.value, str
+                ):
                     query += ",".join("?" for _ in range(len(t_string.value)))
                     values.extend(t_string.value)
                 else:
@@ -152,7 +156,9 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         return self._connection.execute(query, values)
 
-    def add_module_listing(self, module_id: str, manga_id: str, title: str, link: str) -> None:
+    def add_module_listing(
+        self, module_id: str, manga_id: str, title: str, link: str
+    ) -> None:
         with self._connection:
             self._execute(
                 t"""
@@ -162,7 +168,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                 """
             )
 
-    def get_module_listing(self, module_id: str, only_old_entries: bool = True) -> tuple[int, Cursor]:
+    def get_module_listing(
+        self, module_id: str, only_old_entries: bool = True
+    ) -> tuple[int, Cursor]:
         if only_old_entries:
             count = self._execute(
                 t"""
@@ -181,7 +189,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                 """
             )
         else:
-            count = self._execute(t"SELECT COUNT(*) FROM module_manga WHERE module_id = {module_id};")
+            count = self._execute(
+                t"SELECT COUNT(*) FROM module_manga WHERE module_id = {module_id};"
+            )
 
             cursor = self._execute(
                 t"""
@@ -194,7 +204,9 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         return count.fetchone()[0], cursor
 
-    def get_module_listing_non_mapped(self, module_id: str) -> tuple[int, Cursor]:
+    def get_module_listing_non_mapped(
+        self, module_id: str
+    ) -> tuple[int, Cursor]:
         count = self._execute(
             t"""
             SELECT COUNT(*)
@@ -214,7 +226,9 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         return count.fetchone()[0], cursor
 
-    def update_manual_mapping(self, rowid: int, mangabaka_id: int, mangadotnet_id: int) -> None:
+    def update_manual_mapping(
+        self, rowid: int, mangabaka_id: int, mangadotnet_id: int
+    ) -> None:
         with self._connection:
             self._execute(
                 t"""
@@ -323,11 +337,20 @@ class MangaDotNetScraperData(AbstractContextManager):
                         """
                     )
 
-            for language, language_group in groupby(manga.chapters, lambda x: x.language):
-                for scanlator_group, scanlator_group_group in groupby(language_group, lambda x: x.scanlator_group):
-                    for type, type_group in groupby(scanlator_group_group, lambda x: x.type):
+            for language, language_group in groupby(
+                manga.chapters, lambda x: x.language
+            ):
+                for scanlator_group, scanlator_group_group in groupby(
+                    language_group, lambda x: x.scanlator_group
+                ):
+                    for type, type_group in groupby(
+                        scanlator_group_group, lambda x: x.type
+                    ):
                         if type == "chapter":
-                            chapter_list = [chapter.chapter_number for chapter in type_group]
+                            chapter_list = [
+                                chapter.chapter_number
+                                for chapter in type_group
+                            ]
                             self._execute(
                                 t"""
                                 DELETE FROM module_chapter
@@ -340,7 +363,9 @@ class MangaDotNetScraperData(AbstractContextManager):
                                 """
                             )
                         elif type == "volume":
-                            volume_list = [chapter.volume_number for chapter in type_group]
+                            volume_list = [
+                                chapter.volume_number for chapter in type_group
+                            ]
                             self._execute(
                                 t"""
                                 DELETE FROM module_chapter
@@ -383,7 +408,9 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-    def get_non_uploaded_chapters(self, manga_rowid: int) -> tuple[int, Cursor]:
+    def get_non_uploaded_chapters(
+        self, manga_rowid: int
+    ) -> tuple[int, Cursor]:
         count = self._execute(
             t"""
             SELECT COUNT(*)

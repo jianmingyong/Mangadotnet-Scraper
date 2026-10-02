@@ -77,9 +77,12 @@ class MangaBakaApi(AbstractAsyncContextManager):
     async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData:
         async with self._session.get(f"/v2/series/{ids}") as response:
             await self._raise_for_status(response)
-            return dict_get_recursive(await response.json(), "data", default={})
+            json: MangaBakaEntry = await response.json()
+            return dict_get_recursive(json, "data", default={})
 
-    async def get_entry_by_title(self, titles: str | Iterable[str]) -> MangaBakaEntryData | None:
+    async def get_entry_by_title(
+        self, titles: str | Iterable[str]
+    ) -> MangaBakaEntryData | None:
         if isinstance(titles, str):
             titles = [titles]
 
@@ -96,10 +99,12 @@ class MangaBakaApi(AbstractAsyncContextManager):
             ) as response:
                 await self._raise_for_status(response)
 
-                json: MangaBakaEntries = await response.json(encoding="utf-8")
+                json: MangaBakaEntries = await response.json()
 
                 for data in dict_get_recursive(json, "data", default=[]):
-                    for inner_title in dict_get_recursive(data, "titles", default=[]):
+                    for inner_title in dict_get_recursive(
+                        data, "titles", default=[]
+                    ):
                         if title == dict_get_recursive(inner_title, "title"):
                             matches.append(data)
                             break
@@ -118,10 +123,12 @@ class MangaBakaApi(AbstractAsyncContextManager):
             ) as response:
                 await self._raise_for_status(response)
 
-                json: MangaBakaEntries = await response.json(encoding="utf-8")
+                json: MangaBakaEntries = await response.json()
 
                 for data in dict_get_recursive(json, "data", default=[]):
-                    for inner_title in dict_get_recursive(data, "titles", default=[]):
+                    for inner_title in dict_get_recursive(
+                        data, "titles", default=[]
+                    ):
                         if title == dict_get_recursive(inner_title, "title"):
                             matches.append(data)
                             break
@@ -133,7 +140,10 @@ class MangaBakaApi(AbstractAsyncContextManager):
         if len(matches) == 0:
             return None
 
-        count = Counter(dict_get_recursive(json_data, "id", default=0) for json_data in matches)
+        count = Counter(
+            dict_get_recursive(json_data, "id", default=0)
+            for json_data in matches
+        )
         common = count.most_common()
 
         common_id = None

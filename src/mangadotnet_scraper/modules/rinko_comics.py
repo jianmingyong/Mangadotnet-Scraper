@@ -6,16 +6,27 @@ from typing import Literal, ReadOnly, TypedDict, cast, override
 from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import BaseModule, MangaChapter, MangaDetail, MangaListing, MangaPage
+from mangadotnet_scraper.modules.base import (
+    BaseModule,
+    MangaChapter,
+    MangaDetail,
+    MangaListing,
+    MangaPage,
+)
 from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
 class RinkoComicsModule(BaseModule):
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        super().__init__(config, "rinko_comics", "Rinko Comics", "https://rinkocomics.com")
+        super().__init__(
+            config,
+            module_id="rinko_comics",
+            display_name="Rinko Comics",
+            base_url="https://rinkocomics.com",
+        )
 
     @override
-    async def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
+    async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         page = 1
         has_next_page = True
 
@@ -26,8 +37,10 @@ class RinkoComicsModule(BaseModule):
             def find_title(tag: Tag) -> bool:
                 return (
                     tag.name == "a"
-                    and re.search("/comic/", cast(str, tag.get("href", ""))) is not None
-                    and tag.find_parent("h2", {"class": "ac-title"}) is not None
+                    and re.search("/comic/", cast(str, tag.get("href", "")))
+                    is not None
+                    and tag.find_parent("h2", {"class": "ac-title"})
+                    is not None
                 )
 
             elements = soup.find_all(find_title)
@@ -45,13 +58,18 @@ class RinkoComicsModule(BaseModule):
                 if link is None or title is None or series_id is None:
                     continue
 
-                yield MangaListing(clean_string(series_id), clean_string(title), clean_string(link))
+                yield MangaListing(
+                    clean_string(series_id),
+                    clean_string(title),
+                    clean_string(link),
+                )
 
             def has_next_page(tag: Tag) -> bool:
                 return (
                     tag.name == "div"
                     and "ac-pagination" in tag.get_attribute_list("class")
-                    and tag.find("a", {"class": re.compile("next")}) is not None
+                    and tag.find("a", {"class": re.compile("next")})
+                    is not None
                 )
 
             page_element = soup.find(has_next_page)
@@ -66,17 +84,27 @@ class RinkoComicsModule(BaseModule):
         html: ReadOnly[str]
 
     @override
-    async def fetch_manga_detail(self, manga_id: str, link: str) -> MangaDetail:
+    async def on_fetch_manga_detail(
+        self, manga_id: str, link: str
+    ) -> MangaDetail:
         html = await self.get_html(link)
         soup = BeautifulSoup(html, "html.parser")
 
         title_element = soup.find("h1")
-        title = clean_string(title_element.get_text() if title_element is not None else "")
+        title = clean_string(
+            title_element.get_text() if title_element is not None else ""
+        )
 
-        alt_titles_element = soup.find_all("span", attrs={"class": "alt-title"})
-        alt_titles = [clean_string(element.get_text()) for element in alt_titles_element]
+        alt_titles_element = soup.find_all(
+            "span", attrs={"class": "alt-title"}
+        )
+        alt_titles = [
+            clean_string(element.get_text()) for element in alt_titles_element
+        ]
 
-        nonce_element = soup.find("script", {"id": "comicworld-loadmore-js-extra"})
+        nonce_element = soup.find(
+            "script", {"id": "comicworld-loadmore-js-extra"}
+        )
         nonce = None
 
         if nonce_element is not None:
@@ -87,10 +115,17 @@ class RinkoComicsModule(BaseModule):
 
         chapters = []
 
-        async def load_next_chapters(nonce: str, offset: int) -> self.NextChapterResponse:
+        async def load_next_chapters(
+            nonce: str, offset: int
+        ) -> self.NextChapterResponse:
             async with self.session.post(
                 "/wp-admin/admin-ajax.php",
-                data={"action": "load_more_chapters", "nonce": nonce, "comic_id": manga_id, "offset": offset},
+                data={
+                    "action": "load_more_chapters",
+                    "nonce": nonce,
+                    "comic_id": manga_id,
+                    "offset": offset,
+                },
             ) as response:
                 response.raise_for_status()
                 return await response.json()
@@ -112,19 +147,25 @@ class RinkoComicsModule(BaseModule):
                 if chapter_title is None:
                     continue
 
-                title_match = re.search("Chapter (\\d+\\.\\d+|\\d+)", cast(str, chapter_title))
+                title_match = re.search(
+                    "Chapter (\\d+\\.\\d+|\\d+)", cast(str, chapter_title)
+                )
 
                 if title_match:
                     chapter_number = float(title_match[1])
                 else:
                     continue
 
-                chapter_link = cast(str | None, chapter_element.get("data-permalink"))
+                chapter_link = cast(
+                    str | None, chapter_element.get("data-permalink")
+                )
 
                 if chapter_link is None:
                     continue
 
-                chapter_id = cast(str | None, chapter_element.get("data-post-id"))
+                chapter_id = cast(
+                    str | None, chapter_element.get("data-post-id")
+                )
 
                 if chapter_id is None:
                     continue
@@ -136,7 +177,9 @@ class RinkoComicsModule(BaseModule):
                         "chapter",
                         chapter_number,
                         None,
-                        f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
+                        f"Chapter {chapter_number:.1f}".rstrip("0").rstrip(
+                            "."
+                        ),
                         chapter_link,
                         chapter_id,
                     )
@@ -163,14 +206,21 @@ class RinkoComicsModule(BaseModule):
         return MangaDetail(title, alt_titles, chapters)
 
     @override
-    async def fetch_manga_pages(
-        self, manga_id: str, manga_link: str, chapter_id: str, chapter_link: str
+    async def on_fetch_manga_pages(
+        self,
+        manga_id: str,
+        manga_link: str,
+        chapter_id: str,
+        chapter_link: str,
     ) -> list[MangaPage]:
         html = await self.get_html(chapter_link)
         soup = BeautifulSoup(html, "html.parser")
 
         def find_images(tag: Tag) -> bool:
-            return tag.name == "img" and "chapter-image" in tag.get_attribute_list("class")
+            return (
+                tag.name == "img"
+                and "chapter-image" in tag.get_attribute_list("class")
+            )
 
         image_elements = soup.find_all(find_images)
         images = []

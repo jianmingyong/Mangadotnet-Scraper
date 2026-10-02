@@ -1,14 +1,26 @@
 import mimetypes
-from collections.abc import AsyncIterable, Mapping
+from abc import abstractmethod
+from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Final, Literal, NotRequired, Required, Self, TypedDict
+from typing import (
+    Any,
+    Final,
+    Literal,
+    NotRequired,
+    Required,
+    Self,
+    TypedDict,
+    Unpack,
+)
 
-from aiohttp import ClientSession
-from aiohttp.typedefs import Query
+from aiohttp import ClientMiddlewareType, ClientSession
+from aiohttp.client import _RequestOptions
+from aiohttp.typedefs import StrOrURL
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
 from mangadotnet_scraper.network import create_client, retryable_client_session
 
 
@@ -22,8 +34,8 @@ class MangaListing:
 @dataclass(frozen=True)
 class MangaDetail:
     title: str
-    alt_titles: list[str]
-    chapters: list[MangaChapter]
+    alt_titles: Sequence[str]
+    chapters: Sequence[MangaChapter]
 
 
 @dataclass(frozen=True)
@@ -42,7 +54,7 @@ class MangaChapter:
 class MangaPage:
     page_number: int
     link: str
-    data: dict[str, Any] | None
+    data: Mapping[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -51,14 +63,16 @@ class MangaImage:
     data: bytes
 
 
-class BaseModuleArgs(TypedDict):
-    config: Required[MangaDotNetScraperConfig]
+class BaseModuleArgs(TypedDict, closed=True):
     module_id: Required[str]
     display_name: Required[str]
+
     base_url: Required[str]
-    base_api_url: NotRequired[str | None]
-    user_agent: NotRequired[str | None]
+    base_api_url: NotRequired[str]
+
+    user_agent: NotRequired[str]
     additional_headers: NotRequired[Mapping[str, str]]
+    additional_middlewares: NotRequired[Iterable[ClientMiddlewareType]]
 
 
 class BaseModule(AbstractAsyncContextManager):
@@ -72,6 +86,7 @@ class BaseModule(AbstractAsyncContextManager):
 
     user_agent: Final[str | None]
     additional_headers: Final[Mapping[str, str]]
+    additional_middlewares: Final[Iterable[ClientMiddlewareType]]
 
     fetch_concurrency: int
     download_concurrency: int
@@ -82,23 +97,19 @@ class BaseModule(AbstractAsyncContextManager):
     def __init__(
         self,
         config: MangaDotNetScraperConfig,
-        module_id: str,
-        display_name: str,
-        base_url: str,
-        base_api_url: str | None = None,
-        user_agent: str | None = None,
-        additional_headers: Mapping[str, str] = {},
+        **kwargs: Unpack[BaseModuleArgs],
     ) -> None:
         self.config = config
 
-        self.module_id = module_id
-        self.display_name = display_name
+        self.module_id = kwargs["module_id"]
+        self.display_name = kwargs["display_name"]
 
-        self.base_url = base_url
-        self.base_api_url = base_api_url if base_api_url is not None else base_url
+        self.base_url = kwargs["base_url"]
+        self.base_api_url = kwargs.get("base_api_url", self.base_url)
 
-        self.user_agent = user_agent
-        self.additional_headers = additional_headers
+        self.user_agent = kwargs.get("user_agent", None)
+        self.additional_headers = kwargs.get("additional_headers", {})
+        self.additional_middlewares = kwargs.get("additional_middlewares", [])
 
         self.fetch_concurrency = config.fetch_concurrency
         self.download_concurrency = config.download_concurrency
@@ -118,44 +129,120 @@ class BaseModule(AbstractAsyncContextManager):
 
     async def initialize(self) -> None:
         self.session = create_client(
-            base_url=self.base_api_url, user_agent=self.user_agent, additional_headers=self.additional_headers
+            base_url=self.base_api_url,
+            user_agent=self.user_agent,
+            additional_headers=self.additional_headers,
+            additional_middlewares=self.additional_middlewares,
         )
 
     async def close(self) -> None:
         await self.session.close()
 
     @retryable_client_session
-    async def get_html(self, url: str, params: Query = None, headers: Mapping[str, str] | None = None) -> str:
-        async with self.session.get(url, params=params, headers=headers) as response:
+    async def get_html(
+        self,
+        url: StrOrURL,
+        **kwargs: Unpack[_RequestOptions],
+    ) -> str:
+        async with self.session.get(url, **kwargs) as response:
             response.raise_for_status()
             return await response.text("utf-8")
 
     @retryable_client_session
-    async def get_json(self, url: str, params: Query = None, headers: Mapping[str, str] | None = None) -> Any:
-        async with self.session.get(url, params=params, headers=headers) as response:
+    async def get_json(
+        self,
+        url: StrOrURL,
+        **kwargs: Unpack[_RequestOptions],
+    ) -> Any:
+        async with self.session.get(url, **kwargs) as response:
+            response.raise_for_status()
+            return await response.json()
+
+    @retryable_client_session
+    async def post_json(
+        self,
+        url: StrOrURL,
+        **kwargs: Unpack[_RequestOptions],
+    ) -> Any:
+        async with self.session.post(url, **kwargs) as response:
             response.raise_for_status()
             return await response.json()
 
     @retryable_client_session
     async def download_image(
-        self, url: str, params: Query = None, headers: Mapping[str, str] | None = None
+        self,
+        url: StrOrURL,
+        **kwargs: Unpack[_RequestOptions],
     ) -> tuple[str, bytes]:
-        async with self.session.get(url, params=params, headers=headers) as response:
+        async with self.session.get(url, **kwargs) as response:
             response.raise_for_status()
             return (response.content_type, await response.read())
 
     def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
+        try:
+            return self.on_fetch_manga_listing()
+        except FetchError:
+            raise
+        except Exception as error:
+            raise FetchError() from error
+
+    @abstractmethod
+    def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         raise NotImplementedError()
 
-    async def fetch_manga_detail(self, manga_id: str, link: str) -> MangaDetail:
+    async def fetch_manga_detail(
+        self, manga_id: str, link: str
+    ) -> MangaDetail:
+        try:
+            return await self.on_fetch_manga_detail(manga_id, link)
+        except FetchError:
+            raise
+        except SeriesNotFoundError:
+            raise
+        except Exception as error:
+            raise FetchError() from error
+
+    @abstractmethod
+    async def on_fetch_manga_detail(
+        self, manga_id: str, link: str
+    ) -> MangaDetail:
         raise NotImplementedError()
 
     async def fetch_manga_pages(
-        self, manga_id: str, manga_link: str, chapter_id: str, chapter_link: str
-    ) -> list[MangaPage]:
+        self,
+        manga_id: str,
+        manga_link: str,
+        chapter_id: str,
+        chapter_link: str,
+    ) -> Sequence[MangaPage]:
+        try:
+            return await self.on_fetch_manga_pages(
+                manga_id, manga_link, chapter_id, chapter_link
+            )
+        except FetchError:
+            raise
+        except Exception as error:
+            raise FetchError() from error
+
+    @abstractmethod
+    async def on_fetch_manga_pages(
+        self,
+        manga_id: str,
+        manga_link: str,
+        chapter_id: str,
+        chapter_link: str,
+    ) -> Sequence[MangaPage]:
         raise NotImplementedError()
 
     async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
+        try:
+            return await self.on_fetch_manga_image(page)
+        except FetchError:
+            raise
+        except Exception as error:
+            raise FetchError() from error
+
+    async def on_fetch_manga_image(self, page: MangaPage) -> MangaImage:
         content_type, data = await self.download_image(page.link)
         filename = f"{page.page_number:03d}{mimetypes.guess_extension(content_type, False)}"
         return MangaImage(filename, data)
