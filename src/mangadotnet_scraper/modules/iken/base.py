@@ -124,7 +124,9 @@ class IkenTemplate(BaseModule):
             "/api/post", params={"postId": manga_id}
         )
 
-        title = dict_get_recursive(json, "post", "postTitle", default="")
+        title = clean_string(
+            dict_get_recursive(json, "post", "postTitle", default="")
+        )
 
         alt_titles_str: str | None = dict_get_recursive(
             json, "post", "alternativeTitles"
@@ -134,12 +136,12 @@ class IkenTemplate(BaseModule):
             alt_titles = []
         else:
             alt_titles = [
-                x.strip()
+                clean_string(x)
                 for x in re.split(
                     r"[/\\\r\n]+",
                     alt_titles_str,
                 )
-                if len(x.strip()) > 0
+                if len(clean_string(x)) > 0
             ]
 
         chapters = []
