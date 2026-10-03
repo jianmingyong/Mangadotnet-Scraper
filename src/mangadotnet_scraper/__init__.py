@@ -33,15 +33,7 @@ from mangadotnet_scraper.data import (
 )
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.modules import (
-    ArtLapsaModule,
-    BaseModule,
-    EzMangaModule,
-    NyxScansModule,
-    OrionScansModule,
-    RinkoComicsModule,
-    RitharScansModule,
-)
+from mangadotnet_scraper.modules import *
 from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
 from mangadotnet_scraper.utilities import dict_get_recursive
 
@@ -76,6 +68,7 @@ async def initialize_async() -> None:
         NyxScansModule(config),
         RinkoComicsModule(config),
         OrionScansModule(config),
+        KenScansModule(config),
     ]
 
     def generate_choices(text: str, start_index: int = 0) -> list[Choice]:

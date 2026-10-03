@@ -2,12 +2,12 @@ from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.iken.base import IkenTemplate
 
 
-class KenScansModule(IkenTemplate):
+class SanaScansModule(IkenTemplate):
     def __init__(self, config: MangaDotNetScraperConfig):
         super().__init__(
             config,
-            module_id="ken_scans",
-            display_name="Kenscans",
-            base_url="https://kencomics.com",
-            base_api_url="https://api.kencomics.com",
+            module_id="sana_scans",
+            display_name="Sana Scans",
+            base_url="https://sanascans.com",
+            base_api_url="https://api.sanascans.com",
         )

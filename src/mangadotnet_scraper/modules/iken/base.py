@@ -1,8 +1,11 @@
+import re
 from collections.abc import AsyncIterable, Sequence
-from typing import ReadOnly, TypedDict, override
+from typing import Final, ReadOnly, TypedDict, Unpack, override
 
+from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import (
     BaseModule,
+    BaseModuleArgs,
     MangaChapter,
     MangaDetail,
     MangaListing,
@@ -28,7 +31,7 @@ class PostResponse(TypedDict):
 
 class PostResponseData(TypedDict):
     postTitle: ReadOnly[str]
-    alternativeTitles: ReadOnly[str]
+    alternativeTitles: ReadOnly[str | None]
 
 
 class ChaptersResponse(TypedDict):
@@ -65,6 +68,17 @@ class ChapterResponseObjectImages(TypedDict):
 
 
 class IkenTemplate(BaseModule):
+    language: Final[str]
+
+    def __init__(
+        self,
+        config: MangaDotNetScraperConfig,
+        language: str = "en",
+        **kwargs: Unpack[BaseModuleArgs],
+    ) -> None:
+        super().__init__(config, **kwargs)
+        self.language = language
+
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         async def fetch_listing(page: int = 1) -> PostsResponse:
@@ -74,7 +88,6 @@ class IkenTemplate(BaseModule):
                     "page": page,
                     "perPage": 100,
                     "isNovel": "false",
-                    "tag": "new",
                 },
             )
 
@@ -112,9 +125,22 @@ class IkenTemplate(BaseModule):
         )
 
         title = dict_get_recursive(json, "post", "postTitle", default="")
-        alt_titles = dict_get_recursive(
-            json, "post", "alternativeTitles", default=""
-        ).splitlines()
+
+        alt_titles_str: str | None = dict_get_recursive(
+            json, "post", "alternativeTitles"
+        )
+
+        if alt_titles_str is None:
+            alt_titles = []
+        else:
+            alt_titles = [
+                x.strip()
+                for x in re.split(
+                    r"[/\\\r\n]+",
+                    alt_titles_str,
+                )
+                if len(x.strip()) > 0
+            ]
 
         chapters = []
         chapters_json: ChaptersResponse = await self.get_json(
@@ -144,7 +170,7 @@ class IkenTemplate(BaseModule):
 
             chapters.append(
                 MangaChapter(
-                    "en",
+                    self.language,
                     self.display_name,
                     "chapter",
                     number,
