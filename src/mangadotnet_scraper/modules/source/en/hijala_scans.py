@@ -1,5 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.iken.base import IkenTemplate
+from mangadotnet_scraper.modules.template.iken import IkenTemplate
 
 
 class HijalaScansModule(IkenTemplate):
@@ -7,7 +7,10 @@ class HijalaScansModule(IkenTemplate):
         super().__init__(
             config,
             module_id="hijala_scans",
-            display_name="Hijala Translations",
+            display_name="Hijala Scans",
+            language="en",
+            version=1,
             base_url="https://en-hijala.com",
             base_api_url="https://api.en-hijala.com",
+            group_name="Hijala Translations",
         )

@@ -53,7 +53,7 @@ class MangaChapter:
 @dataclass(frozen=True)
 class MangaPage:
     page_number: int
-    link: str
+    image_link: str
     data: Mapping[str, Any] | None
 
 
@@ -66,6 +66,8 @@ class MangaImage:
 class BaseModuleArgs(TypedDict):
     module_id: Required[str]
     display_name: Required[str]
+    language: NotRequired[str]
+    version: NotRequired[int]
 
     base_url: Required[str]
     base_api_url: NotRequired[str]
@@ -80,6 +82,8 @@ class BaseModule(AbstractAsyncContextManager):
 
     module_id: Final[str]
     display_name: Final[str]
+    language: Final[str]
+    version: Final[int]
 
     base_url: Final[str]
     base_api_url: Final[str]
@@ -103,6 +107,8 @@ class BaseModule(AbstractAsyncContextManager):
 
         self.module_id = kwargs["module_id"]
         self.display_name = kwargs["display_name"]
+        self.language = kwargs.get("language", "en")
+        self.version = kwargs.get("version", 1)
 
         self.base_url = kwargs["base_url"]
         self.base_api_url = kwargs.get("base_api_url", self.base_url)
@@ -114,6 +120,16 @@ class BaseModule(AbstractAsyncContextManager):
         self.fetch_concurrency = config.fetch_concurrency
         self.download_concurrency = config.download_concurrency
         self.upload_concurrency = config.upload_concurrency
+
+    @classmethod
+    def create_module(cls, config: MangaDotNetScraperConfig) -> Self:
+        if cls is BaseModule:
+            raise ValueError(
+                "Cannot initialize base module. Please use the constructor instead."
+            )
+
+        # pyrefly: ignore [missing-argument]
+        return cls(config)
 
     async def __aenter__(self) -> Self:
         await self.initialize()
@@ -243,6 +259,6 @@ class BaseModule(AbstractAsyncContextManager):
             raise FetchError() from error
 
     async def on_fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        content_type, data = await self.download_image(page.link)
+        content_type, data = await self.download_image(page.image_link)
         filename = f"{page.page_number:03d}{mimetypes.guess_extension(content_type, False)}"
         return MangaImage(filename, data)

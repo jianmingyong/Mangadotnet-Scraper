@@ -1,23 +1,26 @@
 import json
-from typing import Final, TypedDict
+from collections.abc import Iterable
+from typing import Final, NotRequired, TypedDict
 
 
 class MangaDotNetScraperConfig:
     class Data(TypedDict):
-        data_file: str | None
+        data_file: NotRequired[str]
 
-        mangadotnet_username: str | None
-        mangadotnet_password: str | None
-        mangadotnet_user_session: str | None
+        mangadotnet_username: NotRequired[str]
+        mangadotnet_password: NotRequired[str]
+        mangadotnet_user_session: NotRequired[str | None]
 
-        fetch_concurrency: int | None
+        fetch_concurrency: NotRequired[int]
 
-        download_concurrency: int | None
-        download_max_retry: int | None
+        download_concurrency: NotRequired[int]
+        download_max_retry: NotRequired[int]
 
-        upload_concurrency: int | None
-        upload_chunk_size: int | None
-        upload_verify_duration: int | None
+        upload_concurrency: NotRequired[int]
+        upload_chunk_size: NotRequired[int]
+        upload_verify_duration: NotRequired[int]
+
+        enabled_modules: NotRequired[Iterable[str]]
 
     _CONFIG_FILE_PATH: Final[str] = "./config.json"
 
@@ -32,10 +35,11 @@ class MangaDotNetScraperConfig:
         "upload_concurrency": 10,
         "upload_chunk_size": 4 * 1024 * 1024,
         "upload_verify_duration": 60,
+        "enabled_modules": set(),
     }
 
     def __init__(self) -> None:
-        self._data: MangaDotNetScraperConfig.Data = self._DEFAULT_CONFIG
+        self._data: self.Data = self._DEFAULT_CONFIG
 
     def _return_or_default[T](self, value: T | None, default: T) -> T:
         return value if value is not None else default
@@ -91,6 +95,14 @@ class MangaDotNetScraperConfig:
         return self._return_or_default(
             self._data.get("upload_verify_duration"), 60
         )
+
+    @property
+    def enabled_modules(self) -> Iterable[str]:
+        return self._return_or_default(self._data.get("enabled_modules"), [])
+
+    @enabled_modules.setter
+    def enabled_modules(self, value: Iterable[str]) -> None:
+        self._data["enabled_modules"] = value
 
     def load_config(self) -> None:
         try:

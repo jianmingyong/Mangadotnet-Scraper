@@ -1,5 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.iken.base import IkenTemplate
+from mangadotnet_scraper.modules.template.iken import IkenTemplate
 
 
 class RenaScansModule(IkenTemplate):
@@ -7,7 +7,10 @@ class RenaScansModule(IkenTemplate):
         super().__init__(
             config,
             module_id="rena_scans",
-            display_name="Renascans",
+            display_name="Rena Scans",
+            language="en",
+            version=1,
             base_url="https://renascans.net",
             base_api_url="https://api.renascans.net",
+            group_name="Renascans",
         )

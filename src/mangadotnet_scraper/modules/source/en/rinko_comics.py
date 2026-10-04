@@ -17,11 +17,15 @@ from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
 class RinkoComicsModule(BaseModule):
+    _GROUP = "Rinko Comics"
+
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(
             config,
             module_id="rinko_comics",
             display_name="Rinko Comics",
+            language="en",
+            version=1,
             base_url="https://rinkocomics.com",
         )
 
@@ -172,8 +176,8 @@ class RinkoComicsModule(BaseModule):
 
                 chapters.append(
                     MangaChapter(
-                        "en",
-                        self.display_name,
+                        self.language,
+                        self._GROUP,
                         "chapter",
                         chapter_number,
                         None,

@@ -1,13 +1,16 @@
 import json
 import re
 from collections.abc import AsyncIterable, Sequence
-from typing import Unpack, cast, override
+from typing import Final, Unpack, cast, override
 
 from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup, Tag
-from playwright.async_api import Browser, Error, Response
+from playwright.async_api import Browser, Error
 
-from mangadotnet_scraper.camoufox_utils import create_browser
+from mangadotnet_scraper.camoufox_utils import (
+    create_browser,
+    handle_cloudflare_interstitial,
+)
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import (
     BaseModule,
@@ -23,51 +26,45 @@ from mangadotnet_scraper.utilities import clean_string
 
 
 class KeyoAppTemplate(BaseModule):
-    base_fetch_listing_url: str
-    base_cdn_url: str
+    group_name: Final[str]
+    base_cdn_url: Final[str]
 
     def __init__(
         self,
         config: MangaDotNetScraperConfig,
+        group_name: str,
         base_cdn_url: str,
-        base_fetch_listing_url: str = "/latest",
         **kwargs: Unpack[BaseModuleArgs],
     ) -> None:
         super().__init__(config, **kwargs)
 
-        self.base_fetch_listing_url = base_fetch_listing_url
+        self.group_name = group_name
         self.base_cdn_url = base_cdn_url
 
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         async with (
-            create_browser() as browser,
+            create_browser(False) as browser,
             await cast(Browser, browser).new_context() as context,
         ):
             page = await context.new_page()
 
-            response = cast(
-                Response,
-                await page.goto(
-                    f"{self.base_url}{self.base_fetch_listing_url}"
-                ),
-            )
+            target_page = f"{self.base_url}/latest"
+
+            response = await handle_cloudflare_interstitial(page, target_page)
 
             if not response.ok:
                 raise FetchError(
-                    f"Request returned {response.status} ({response.status_text})"
+                    f"Request returned {response.status} ({response.status_text}) for {target_page}"
                 )
 
             while True:
                 try:
-                    button = await page.wait_for_selector(
-                        'button[wire\\:click="loadMore"]', state="attached"
+                    await page.click(
+                        'a[wire\\:click\\.prevent="loadMore"]',
+                        strict=True,
+                        timeout=5000,
                     )
-
-                    if button is not None:
-                        await button.click()
-                    else:
-                        break
                 except Error:
                     break
 
@@ -147,8 +144,8 @@ class KeyoAppTemplate(BaseModule):
 
             chapters.append(
                 MangaChapter(
-                    "en",
-                    self.display_name,
+                    self.language,
+                    self.group_name,
                     "chapter",
                     chapter_number,
                     None,

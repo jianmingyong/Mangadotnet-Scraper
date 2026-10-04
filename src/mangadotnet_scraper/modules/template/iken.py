@@ -68,16 +68,17 @@ class ChapterResponseObjectImages(TypedDict):
 
 
 class IkenTemplate(BaseModule):
-    language: Final[str]
+    group_name: Final[str]
 
     def __init__(
         self,
         config: MangaDotNetScraperConfig,
-        language: str = "en",
+        group_name: str,
         **kwargs: Unpack[BaseModuleArgs],
     ) -> None:
         super().__init__(config, **kwargs)
-        self.language = language
+
+        self.group_name = group_name
 
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
@@ -173,7 +174,7 @@ class IkenTemplate(BaseModule):
             chapters.append(
                 MangaChapter(
                     self.language,
-                    self.display_name,
+                    self.group_name,
                     "chapter",
                     number,
                     None,

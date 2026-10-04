@@ -15,12 +15,15 @@ from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 class EzMangaModule(BaseModule):
     _BASE_URL = "https://ezmanga.org"
     _BASE_API_URL = "https://vapi.ezmanga.org"
+    _GROUP_NAME = "Ezmanga"
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(
             config,
             module_id="ez_manga",
-            display_name="Ezmanga",
+            display_name="EzManga",
+            language="en",
+            version=1,
             base_url=self._BASE_URL,
             base_api_url=self._BASE_API_URL,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
@@ -143,8 +146,8 @@ class EzMangaModule(BaseModule):
 
                     chapters.append(
                         MangaChapter(
-                            "en",
-                            self.display_name,
+                            self.language,
+                            self._GROUP_NAME,
                             "chapter",
                             inner_number,
                             None,

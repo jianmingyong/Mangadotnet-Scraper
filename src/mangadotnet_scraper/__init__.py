@@ -2,6 +2,7 @@ import asyncio
 import logging
 from asyncio import Semaphore, sleep
 from asyncio.taskgroups import TaskGroup
+from collections.abc import Sequence
 from io import BytesIO
 from time import monotonic
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -35,6 +36,7 @@ from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
 from mangadotnet_scraper.modules import *
 from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.utilities import dict_get_recursive
 
 
@@ -61,81 +63,77 @@ async def initialize_async() -> None:
     config = MangaDotNetScraperConfig()
     config.load_config()
 
-    modules: list[BaseModule] = [
-        ArtLapsaModule(config),
-        RitharScansModule(config),
-        EzMangaModule(config),
-        NyxScansModule(config),
-        RinkoComicsModule(config),
-        OrionScansModule(config),
-        KenScansModule(config),
-    ]
+    with (
+        MangaDotNetScraperData(config) as data,
+        ModuleManager(config, data) as manager,
+    ):
+        async with (
+            MangaBakaApi() as mangabaka_api,
+            MangaDotNetApi(config) as mangadotnet_api,
+        ):
 
-    def generate_choices(text: str, start_index: int = 0) -> list[Choice]:
-        return [
-            Choice(f"{text} {module.display_name}", start_index + index)
-            for index, module in zip(range(len(modules)), modules)
-        ]
+            def generate_choices(text: str) -> Sequence[Choice]:
+                return [
+                    Choice(f"{text} {module.display_name}", module.module_id)
+                    for module in manager.get_enabled_modules()
+                ]
 
-    try:
-        with MangaDotNetScraperData(config) as data:
-            while True:
-                selection = await questionary.select(
-                    "What would you like to do?",
-                    choices=[
-                        Choice("Fetch Listing", 1),
-                        Choice("Fetch Listing Details With Mapping", 2),
-                        Choice("Fetch Listing Details Without Mapping", 3),
-                        Choice("Manual Mapping", 5),
-                        Choice("Upload", 4),
-                        Choice("Quit", -1),
-                    ],
-                ).ask_async()
-
-                if selection is None:
-                    break
-
-                if selection == 1:
+            try:
+                while True:
                     selection = await questionary.select(
-                        "Which Module(s) to Fetch Listing",
+                        "What would you like to do?",
                         choices=[
-                            Choice("All", -1),
-                            *generate_choices("Fetch"),
-                            Choice("Back", -2),
+                            Choice("Fetch Listing", 1),
+                            Choice("Fetch Listing Details With Mapping", 2),
+                            Choice("Fetch Listing Details Without Mapping", 3),
+                            Choice("Manual Mapping", 5),
+                            Choice("Upload", 4),
+                            Choice("Settings", 6),
+                            Choice("Quit", -1),
                         ],
+                        use_shortcuts=True,
                     ).ask_async()
 
                     if selection is None:
-                        continue
+                        break
 
-                    if selection == -1:
-                        for module in modules:
-                            async with module:
+                    if selection == 1:
+                        selection = await questionary.select(
+                            "Which Module(s) to Fetch Listing",
+                            choices=[
+                                Choice("All", -1),
+                                *generate_choices("Fetch"),
+                                Choice("Back", -2),
+                            ],
+                        ).ask_async()
+
+                        if selection is None:
+                            continue
+
+                        if selection == -1:
+                            for module in manager.get_enabled_modules():
+                                async with module:
+                                    await fetch_module_listing(module, data)
+                        elif selection == -2:
+                            continue
+                        else:
+                            async with manager.get_module(selection) as module:
                                 await fetch_module_listing(module, data)
-                    elif 0 <= selection < len(modules):
-                        async with modules[selection] as module:
-                            await fetch_module_listing(module, data)
-                    else:
-                        continue
-                elif selection == 2:
-                    selection = await questionary.select(
-                        "Which Module(s) to Fetch Listing Details With Mapping",
-                        choices=[
-                            Choice("All", -1),
-                            *generate_choices("Fetch"),
-                            Choice("Back", -2),
-                        ],
-                    ).ask_async()
+                    elif selection == 2:
+                        selection = await questionary.select(
+                            "Which Module(s) to Fetch Listing Details With Mapping",
+                            choices=[
+                                Choice("All", -1),
+                                *generate_choices("Fetch"),
+                                Choice("Back", -2),
+                            ],
+                        ).ask_async()
 
-                    if selection is None:
-                        continue
+                        if selection is None:
+                            continue
 
-                    if selection == -1:
-                        async with (
-                            MangaBakaApi() as mangabaka_api,
-                            MangaDotNetApi(config) as mangadotnet_api,
-                        ):
-                            for module in modules:
+                        if selection == -1:
+                            for module in manager.get_enabled_modules():
                                 async with module:
                                     await fetch_module_listing_details(
                                         module,
@@ -144,40 +142,32 @@ async def initialize_async() -> None:
                                         mangadotnet_api,
                                         only_old_entries=False,
                                     )
-                    elif 0 <= selection < len(modules):
-                        async with (
-                            MangaBakaApi() as mangabaka_api,
-                            MangaDotNetApi(config) as mangadotnet_api,
-                            modules[selection] as module,
-                        ):
-                            await fetch_module_listing_details(
-                                module,
-                                data,
-                                mangabaka_api,
-                                mangadotnet_api,
-                                only_old_entries=False,
-                            )
-                    else:
-                        continue
-                elif selection == 3:
-                    selection = await questionary.select(
-                        "Which Module(s) to Fetch Listing Details Without Mapping",
-                        choices=[
-                            Choice("All", -1),
-                            *generate_choices("Fetch"),
-                            Choice("Back", -2),
-                        ],
-                    ).ask_async()
+                        elif selection == -2:
+                            continue
+                        else:
+                            async with manager.get_module(selection) as module:
+                                await fetch_module_listing_details(
+                                    module,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                    only_old_entries=False,
+                                )
+                    elif selection == 3:
+                        selection = await questionary.select(
+                            "Which Module(s) to Fetch Listing Details Without Mapping",
+                            choices=[
+                                Choice("All", -1),
+                                *generate_choices("Fetch"),
+                                Choice("Back", -2),
+                            ],
+                        ).ask_async()
 
-                    if selection is None:
-                        continue
+                        if selection is None:
+                            continue
 
-                    if selection == -1:
-                        async with (
-                            MangaBakaApi() as mangabaka_api,
-                            MangaDotNetApi(config) as mangadotnet_api,
-                        ):
-                            for module in modules:
+                        if selection == -1:
+                            for module in manager.get_enabled_modules():
                                 async with module:
                                     await fetch_module_listing_details(
                                         module,
@@ -187,79 +177,111 @@ async def initialize_async() -> None:
                                         only_old_entries=False,
                                         skip_mapping=True,
                                     )
-                    elif 0 <= selection < len(modules):
-                        async with (
-                            MangaBakaApi() as mangabaka_api,
-                            MangaDotNetApi(config) as mangadotnet_api,
-                            modules[selection] as module,
-                        ):
-                            await fetch_module_listing_details(
-                                module,
-                                data,
-                                mangabaka_api,
-                                mangadotnet_api,
-                                only_old_entries=False,
-                                skip_mapping=True,
-                            )
-                    else:
-                        continue
-                elif selection == 4:
-                    selection = await questionary.select(
-                        "Which Module(s) to Upload",
-                        choices=[
-                            Choice("All", -1),
-                            *generate_choices("Upload"),
-                            Choice("Back", -2),
-                        ],
-                    ).ask_async()
+                        elif selection == -2:
+                            continue
+                        else:
+                            async with manager.get_module(selection) as module:
+                                await fetch_module_listing_details(
+                                    module,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                    only_old_entries=False,
+                                    skip_mapping=True,
+                                )
+                    elif selection == 4:
+                        selection = await questionary.select(
+                            "Which Module(s) to Upload",
+                            choices=[
+                                Choice("All", -1),
+                                *generate_choices("Upload"),
+                                Choice("Back", -2),
+                            ],
+                        ).ask_async()
 
-                    if selection is None:
-                        continue
+                        if selection is None:
+                            continue
 
-                    if selection == -1:
-                        async with MangaDotNetApi(config) as mangadotnet_api:
-                            for module in modules:
+                        if selection == -1:
+                            for module in manager.get_enabled_modules():
                                 async with module:
                                     await upload_chapters(
-                                        module, config, data, mangadotnet_api
+                                        module,
+                                        config,
+                                        data,
+                                        mangadotnet_api,
                                     )
-                    elif 0 <= selection < len(modules):
-                        async with (
-                            MangaDotNetApi(config) as mangadotnet_api,
-                            modules[selection] as module,
-                        ):
-                            await upload_chapters(
-                                module, config, data, mangadotnet_api
-                            )
-                    else:
-                        continue
-                elif selection == 5:
-                    selection = await questionary.select(
-                        "Which Module(s) to Manual Mapping",
-                        choices=[
-                            *generate_choices("Map"),
-                            Choice("Back", -1),
-                        ],
-                    ).ask_async()
+                        elif selection == -2:
+                            continue
+                        else:
+                            async with manager.get_module(selection) as module:
+                                await upload_chapters(
+                                    module, config, data, mangadotnet_api
+                                )
+                    elif selection == 5:
+                        selection = await questionary.select(
+                            "Which Module(s) to Manual Mapping",
+                            choices=[
+                                *generate_choices("Map"),
+                                Choice("Back", -1),
+                            ],
+                        ).ask_async()
 
-                    if selection is None:
-                        continue
+                        if selection is None:
+                            continue
 
-                    if 0 <= selection < len(modules):
-                        async with (
-                            MangaBakaApi() as mangabaka_api,
-                            MangaDotNetApi(config) as mangadotnet_api,
-                            modules[selection] as module,
-                        ):
-                            await manual_entry_matching(
-                                module, data, mangabaka_api, mangadotnet_api
-                            )
+                        if selection == -1:
+                            continue
+                        else:
+                            async with manager.get_module(selection) as module:
+                                await manual_entry_matching(
+                                    module,
+                                    data,
+                                    mangabaka_api,
+                                    mangadotnet_api,
+                                )
+                    elif selection == 6:
+                        selection = await questionary.select(
+                            "What would you like to do?",
+                            choices=[
+                                Choice("Configure Modules", 1),
+                                Choice("Back", -1),
+                            ],
+                            use_shortcuts=True,
+                        ).ask_async()
+
+                        if selection is None:
+                            continue
+
+                        if selection == 1:
+                            choices = []
+
+                            for module_id, module in manager.get_modules():
+                                choices.append(
+                                    Choice(
+                                        f"{module.display_name}",
+                                        module_id,
+                                        checked=module_id
+                                        in config.enabled_modules,
+                                        description=f"{module.display_name} | Language: {module.language} | Version: {module.version}",
+                                    )
+                                )
+
+                            selection = await questionary.checkbox(
+                                "Choose modules you would like to enable:",
+                                choices=choices,
+                                use_jk_keys=False,
+                                use_search_filter=True,
+                                show_description=True,
+                            ).ask_async()
+
+                            config.enabled_modules = selection
+                        else:
+                            continue
                     else:
-                        continue
-                else:
-                    break
-    finally:
-        config.save_config()
+                        break
+            finally:
+                config.save_config()
 
 
 async def fetch_module_listing(

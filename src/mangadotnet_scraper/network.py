@@ -28,13 +28,14 @@ def create_client(
     **kwargs,
 ) -> ClientSession:
     headers = {}
-    headers.update(additional_headers)
 
     if base_url is not None:
         headers.update({"Origin": base_url})
 
     if user_agent is not None:
         headers.update({"User-Agent": user_agent})
+
+    headers.update(additional_headers)
 
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, ttl_dns_cache=3600)

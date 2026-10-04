@@ -1,5 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.keyoapp.base import KeyoAppTemplate
+from mangadotnet_scraper.modules.template.keyoapp import KeyoAppTemplate
 
 
 class RitharScansModule(KeyoAppTemplate):
@@ -8,6 +8,9 @@ class RitharScansModule(KeyoAppTemplate):
             config,
             module_id="rithar_scans",
             display_name="Rithar Scans",
+            language="en",
+            version=1,
             base_url="https://ritharscans.com",
+            group_name="Rithar Scans",
             base_cdn_url="https://cdn.ritharscans.com",
         )

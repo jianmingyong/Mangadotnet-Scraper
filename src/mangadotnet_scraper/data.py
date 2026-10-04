@@ -135,7 +135,8 @@ class MangaDotNetScraperData(AbstractContextManager):
                 )
 
     def close(self) -> None:
-        self._connection.close()
+        if self._connection is not None:
+            self._connection.close()
 
     def _execute(self, sql: Template) -> Cursor:
         query = ""
