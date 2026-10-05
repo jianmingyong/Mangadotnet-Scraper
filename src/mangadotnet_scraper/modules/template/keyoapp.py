@@ -44,7 +44,7 @@ class KeyoAppTemplate(BaseModule):
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
         async with (
-            create_browser(False) as browser,
+            create_browser() as browser,
             await cast(Browser, browser).new_context() as context,
         ):
             page = await context.new_page()
