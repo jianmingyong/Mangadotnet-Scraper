@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from itertools import groupby
 from sqlite3 import Connection, Cursor
 from sqlite3 import connect as sqlite3_connect
-from string.templatelib import Interpolation, Template
+from string.templatelib import Interpolation, Template, convert
 from types import TracebackType
 from typing import Final, Literal
 
@@ -144,14 +144,29 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         for t_string in sql:
             if isinstance(t_string, Interpolation):
-                if isinstance(t_string.value, Collection) and not isinstance(
-                    t_string.value, str
-                ):
-                    query += ",".join("?" for _ in range(len(t_string.value)))
-                    values.extend(t_string.value)
+                if t_string.format_spec == "l":
+                    query += convert(t_string.value, t_string.conversion)
                 else:
-                    query += "?"
-                    values.append(t_string.value)
+                    if not isinstance(t_string.value, str) and isinstance(
+                        t_string.value, Collection
+                    ):
+                        query += ",".join(
+                            "?" for _ in range(len(t_string.value))
+                        )
+                        values.append(
+                            format(
+                                convert(t_string.value, t_string.conversion),
+                                t_string.format_spec,
+                            )
+                        )
+                    else:
+                        query += "?"
+                        values.append(
+                            format(
+                                convert(t_string.value, t_string.conversion),
+                                t_string.format_spec,
+                            )
+                        )
             else:
                 query += t_string
 
@@ -170,8 +185,16 @@ class MangaDotNetScraperData(AbstractContextManager):
             )
 
     def get_module_listing(
-        self, module_id: str, only_old_entries: bool = True
+        self,
+        module_id: str,
+        only_old_entries: bool = True,
+        verbose: bool = False,
     ) -> tuple[int, Cursor]:
+        columns = "rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override"
+
+        if verbose:
+            columns = "rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, skip_upload"
+
         if only_old_entries:
             count = self._execute(
                 t"""
@@ -183,7 +206,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
+                SELECT {columns:l}
                 FROM module_manga
                 WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
                 ORDER BY title;
@@ -196,7 +219,7 @@ class MangaDotNetScraperData(AbstractContextManager):
 
             cursor = self._execute(
                 t"""
-                SELECT rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override
+                SELECT {columns:l}
                 FROM module_manga
                 WHERE module_id = {module_id}
                 ORDER BY title;
@@ -228,7 +251,7 @@ class MangaDotNetScraperData(AbstractContextManager):
         return count.fetchone()[0], cursor
 
     def update_manual_mapping(
-        self, rowid: int, mangabaka_id: int, mangadotnet_id: int
+        self, rowid: int, mangabaka_id: int | None, mangadotnet_id: int | None
     ) -> None:
         with self._connection:
             self._execute(
@@ -242,6 +265,27 @@ class MangaDotNetScraperData(AbstractContextManager):
                     rowid = {rowid};
                 """
             )
+
+    def update_module_manga_upload_status(
+        self, rowid: int, skip_upload: int | bool
+    ) -> None:
+        with self._connection:
+            self._execute(
+                t"""
+                UPDATE module_manga
+                SET
+                    skip_upload = {1 if skip_upload else 0}
+                WHERE
+                    rowid = {rowid};
+                """
+            )
+
+    def get_module_manga(self, rowid: int) -> Cursor:
+        return self._execute(t"""
+            SELECT rowid, module_id, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, manual_override, skip_upload
+            FROM module_manga
+            WHERE rowid = {rowid};
+        """)
 
     def add_module_manga(self, rowid: int, manga: ModuleManga) -> None:
         with self._connection:
