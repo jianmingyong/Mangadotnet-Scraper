@@ -23,10 +23,16 @@ from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 def create_client(
     base_url: str | None = None,
     user_agent: str | None = None,
-    additional_headers: Mapping[str, str] = {},
-    additional_middlewares: Iterable[ClientMiddlewareType] = [],
+    additional_headers: Mapping[str, str] | None = None,
+    additional_middlewares: Iterable[ClientMiddlewareType] | None = None,
     **kwargs,
 ) -> ClientSession:
+    if additional_headers is None:
+        additional_headers = {}
+
+    if additional_middlewares is None:
+        additional_middlewares = []
+
     headers = {}
 
     if base_url is not None:

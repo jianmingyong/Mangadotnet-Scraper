@@ -53,7 +53,10 @@ class KeyoAppTemplate(BaseModule):
 
             response = await handle_cloudflare_interstitial(page, target_page)
 
-            if not response.ok and await response.header_value("cf-mitigated") != "challenge":
+            if (
+                not response.ok
+                and await response.header_value("cf-mitigated") != "challenge"
+            ):
                 raise FetchError(
                     f"Request returned {response.status} ({response.status_text}) for {target_page}"
                 )

@@ -86,7 +86,10 @@ async def get_cloudflare_cookies(
                 )
                 return None
 
-            if not response.ok and await response.header_value("cf-mitigated") != "challenge":
+            if (
+                not response.ok
+                and await response.header_value("cf-mitigated") != "challenge"
+            ):
                 logging.getLogger(__name__).error(
                     f"Failed to get cloudflare cookies due to request {response.status} ({response.status_text}) from {url}"
                 )
