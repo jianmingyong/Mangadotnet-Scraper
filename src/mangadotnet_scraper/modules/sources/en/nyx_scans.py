@@ -1,7 +1,7 @@
 from typing import override
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.template.iken import IkenTemplate
+from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
 class NyxScansModule(IkenTemplate):

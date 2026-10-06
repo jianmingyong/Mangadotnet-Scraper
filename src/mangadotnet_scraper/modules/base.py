@@ -54,7 +54,7 @@ class MangaChapter:
 class MangaPage:
     page_number: int
     image_link: str
-    data: Mapping[str, Any] | None
+    data: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,7 +172,7 @@ class BaseModule(AbstractAsyncContextManager):
     ) -> Any:
         async with self.session.get(url, **kwargs) as response:
             response.raise_for_status()
-            return await response.json()
+            return await response.json(encoding="utf-8")
 
     @retryable_client_session
     async def post_json(
@@ -182,7 +182,7 @@ class BaseModule(AbstractAsyncContextManager):
     ) -> Any:
         async with self.session.post(url, **kwargs) as response:
             response.raise_for_status()
-            return await response.json()
+            return await response.json(encoding="utf-8")
 
     @retryable_client_session
     async def download_image(

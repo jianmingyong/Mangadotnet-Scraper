@@ -1,5 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.template.keyoapp import KeyoAppTemplate
+from mangadotnet_scraper.modules.templates.keyoapp import KeyoAppTemplate
 
 
 class ArtLapsaModule(KeyoAppTemplate):
