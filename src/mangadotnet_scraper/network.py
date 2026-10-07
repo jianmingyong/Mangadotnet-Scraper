@@ -82,7 +82,7 @@ def retryable_client_session[**P, R](
         for retry in range(max_retry):
             try:
                 return await async_func(*args, **kwargs)
-            except ClientConnectionError:
+            except ClientConnectionError, TimeoutError:
                 logging.getLogger(__name__).error(
                     f"Client failed to connect. Retry attempt {retry + 1}/{max_retry}"
                 )
