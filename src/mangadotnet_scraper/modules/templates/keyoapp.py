@@ -66,7 +66,7 @@ class KeyoAppTemplate(BaseModule):
                     await page.click(
                         'a[wire\\:click\\.prevent="loadMore"]',
                         strict=True,
-                        timeout=5000,
+                        timeout=30000,
                     )
                 except Error:
                     break

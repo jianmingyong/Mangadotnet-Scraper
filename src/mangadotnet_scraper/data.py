@@ -144,29 +144,22 @@ class MangaDotNetScraperData(AbstractContextManager):
 
         for t_string in sql:
             if isinstance(t_string, Interpolation):
-                if t_string.format_spec == "l":
-                    query += convert(t_string.value, t_string.conversion)
+                value = convert(t_string.value, t_string.conversion)
+
+                if isinstance(value, str) and t_string.format_spec == "l":
+                    query += value
+                elif not isinstance(value, str) and isinstance(
+                    value, Collection
+                ):
+                    query += ",".join("?" for _ in range(len(value)))
+                    values.extend(value)
                 else:
-                    if not isinstance(t_string.value, str) and isinstance(
-                        t_string.value, Collection
-                    ):
-                        query += ",".join(
-                            "?" for _ in range(len(t_string.value))
-                        )
-                        values.append(
-                            format(
-                                convert(t_string.value, t_string.conversion),
-                                t_string.format_spec,
-                            )
-                        )
-                    else:
-                        query += "?"
-                        values.append(
-                            format(
-                                convert(t_string.value, t_string.conversion),
-                                t_string.format_spec,
-                            )
-                        )
+                    query += "?"
+                    values.append(
+                        format(value, t_string.format_spec)
+                        if t_string.format_spec != ""
+                        else value
+                    )
             else:
                 query += t_string
 
