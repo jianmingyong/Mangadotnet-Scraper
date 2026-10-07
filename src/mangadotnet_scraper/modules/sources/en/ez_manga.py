@@ -40,7 +40,7 @@ class EzMangaModule(BaseModule):
         id: int
         slug: str
         title: str
-        alternativeTitles: str
+        alternativeTitles: str | None
         type: str
 
     @override
@@ -82,7 +82,7 @@ class EzMangaModule(BaseModule):
 
     class MangaDetailResponse(TypedDict):
         title: str
-        alternativeTitles: str
+        alternativeTitles: str | None
 
     class MangaChapterResponse(TypedDict):
         data: Sequence[EzMangaModule.MangaChapterResponseData]
@@ -110,9 +110,8 @@ class EzMangaModule(BaseModule):
         title = clean_string(
             dict_get_recursive(detail_json, "title", default="")
         )
-        alt_titles = clean_string(
-            dict_get_recursive(detail_json, "alternativeTitles", default="")
-        )
+        alt_titles = dict_get_recursive(detail_json, "alternativeTitles", default="")
+        alt_titles = clean_string(alt_titles if alt_titles is not None else "")
 
         chapters = []
 
