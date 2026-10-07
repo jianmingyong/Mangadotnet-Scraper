@@ -142,7 +142,6 @@ async def initialize_async() -> None:
                                         data,
                                         mangabaka_api,
                                         mangadotnet_api,
-                                        only_old_entries=False,
                                     )
                         elif selection == -2:
                             continue
@@ -153,7 +152,6 @@ async def initialize_async() -> None:
                                     data,
                                     mangabaka_api,
                                     mangadotnet_api,
-                                    only_old_entries=False,
                                 )
                     elif selection == 3:
                         selection = await questionary.select(
@@ -176,7 +174,6 @@ async def initialize_async() -> None:
                                         data,
                                         mangabaka_api,
                                         mangadotnet_api,
-                                        only_old_entries=False,
                                         skip_mapping=True,
                                     )
                         elif selection == -2:
@@ -188,7 +185,6 @@ async def initialize_async() -> None:
                                     data,
                                     mangabaka_api,
                                     mangadotnet_api,
-                                    only_old_entries=False,
                                     skip_mapping=True,
                                 )
                     elif selection == 4:
@@ -344,7 +340,6 @@ async def fetch_module_listing_details(
     data: MangaDotNetScraperData,
     mangabaka_api: MangaBakaApi,
     mangadotnet_api: MangaDotNetApi,
-    only_old_entries: bool = True,
     map_only_null: bool = True,
     skip_mapping: bool = False,
 ) -> None:
@@ -363,7 +358,17 @@ async def fetch_module_listing_details(
         Group(Rule(), total_progress, Rule(), current_progress), transient=True
     ):
         listing_count, listing = data.get_module_listing(
-            module.module_id, only_old_entries
+            module.module_id,
+            [
+                "rowid",
+                "manga_id",
+                "link",
+                "title",
+                "mangabaka_id",
+                "mangadotnet_id",
+                "manual_override",
+            ],
+            order_by="title",
         )
         total_progress_task_id = total_progress.add_task(
             module.display_name, total=listing_count
@@ -404,7 +409,19 @@ async def fetch_module_listing_details(
                         )
 
                     if not manual_override and not skip_mapping:
-                        if mangabaka_id is None or not map_only_null:
+                        if map_only_null:
+                            if mangabaka_id is None:
+                                mangabaka_entry = (
+                                    await mangabaka_api.get_entry_by_title(
+                                        [detail.title, *detail.alt_titles]
+                                    )
+                                )
+
+                                if mangabaka_entry is not None:
+                                    mangabaka_id = dict_get_recursive(
+                                        mangabaka_entry, "id"
+                                    )
+                        else:
                             mangabaka_entry = (
                                 await mangabaka_api.get_entry_by_title(
                                     [detail.title, *detail.alt_titles]
@@ -416,7 +433,30 @@ async def fetch_module_listing_details(
                                     mangabaka_entry, "id"
                                 )
 
-                        if mangadotnet_id is None or not map_only_null:
+                        if map_only_null:
+                            if mangadotnet_id is None:
+                                if mangabaka_id is not None:
+                                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(
+                                        mangabaka_id
+                                    )
+
+                                    if mangadotnet_id is None:
+                                        response = await mangadotnet_api.create_from_mangabaka(
+                                            mangabaka_id
+                                        )
+                                        mangadotnet_id = dict_get_recursive(
+                                            response, "manga", "id"
+                                        )
+                                else:
+                                    mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
+                                        [detail.title, *detail.alt_titles]
+                                    )
+
+                                    if mangadotnet_entry is not None:
+                                        mangadotnet_id = dict_get_recursive(
+                                            mangadotnet_entry, "manga", "id"
+                                        )
+                        else:
                             if mangabaka_id is not None:
                                 mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(
                                     mangabaka_id
@@ -1072,7 +1112,18 @@ async def manual_source_editing(
     async def show_initial_menu() -> None:
         while True:
             _count, module_listing = data.get_module_listing(
-                module.module_id, only_old_entries=False, verbose=True
+                module.module_id,
+                columns=[
+                    "rowid",
+                    "manga_id",
+                    "link",
+                    "title",
+                    "alt_titles",
+                    "mangabaka_id",
+                    "mangadotnet_id",
+                    "last_checked",
+                    "skip_upload",
+                ],
             )
 
             choices = [

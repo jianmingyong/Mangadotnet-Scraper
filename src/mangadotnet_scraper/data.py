@@ -1,4 +1,4 @@
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from itertools import groupby
@@ -180,44 +180,36 @@ class MangaDotNetScraperData(AbstractContextManager):
     def get_module_listing(
         self,
         module_id: str,
-        only_old_entries: bool = True,
-        verbose: bool = False,
+        columns: Iterable[str] | None = None,
+        order_by: str = "rowid",
     ) -> tuple[int, Cursor]:
-        columns = "rowid, manga_id, link, title, mangabaka_id, mangadotnet_id, manual_override"
+        if columns is None:
+            columns = [
+                "rowid",
+                "module_id",
+                "manga_id",
+                "link",
+                "title",
+                "alt_titles",
+                "mangabaka_id",
+                "mangadotnet_id",
+                "last_checked",
+                "manual_override",
+                "skip_upload",
+            ]
 
-        if verbose:
-            columns = "rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, skip_upload"
+        count = self._execute(
+            t"SELECT COUNT(*) FROM module_manga WHERE module_id = {module_id};"
+        )
 
-        if only_old_entries:
-            count = self._execute(
-                t"""
-                SELECT COUNT(*)
-                FROM module_manga
-                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'));
-                """
-            )
-
-            cursor = self._execute(
-                t"""
-                SELECT {columns:l}
-                FROM module_manga
-                WHERE module_id = {module_id} AND (last_checked IS NULL OR last_checked <= strftime('%s', 'now', '-12 hours'))
-                ORDER BY title;
-                """
-            )
-        else:
-            count = self._execute(
-                t"SELECT COUNT(*) FROM module_manga WHERE module_id = {module_id};"
-            )
-
-            cursor = self._execute(
-                t"""
-                SELECT {columns:l}
-                FROM module_manga
-                WHERE module_id = {module_id}
-                ORDER BY title;
-                """
-            )
+        cursor = self._execute(
+            t"""
+            SELECT {",".join(columns):l}
+            FROM module_manga
+            WHERE module_id = {module_id}
+            ORDER BY {order_by};
+            """
+        )
 
         return count.fetchone()[0], cursor
 
