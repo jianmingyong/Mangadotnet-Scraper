@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterable, Sequence
 from typing import TypedDict, override
 
@@ -110,8 +111,22 @@ class EzMangaModule(BaseModule):
         title = clean_string(
             dict_get_recursive(detail_json, "title", default="")
         )
-        alt_titles = dict_get_recursive(detail_json, "alternativeTitles", default="")
-        alt_titles = clean_string(alt_titles if alt_titles is not None else "")
+
+        alt_titles_str: str | None = dict_get_recursive(
+            detail_json, "alternativeTitles"
+        )
+
+        if alt_titles_str is None:
+            alt_titles = []
+        else:
+            alt_titles = [
+                clean_string(x)
+                for x in re.split(
+                    r"[/\\\r\n]+",
+                    alt_titles_str,
+                )
+                if len(clean_string(x)) > 0
+            ]
 
         chapters = []
 
@@ -165,7 +180,7 @@ class EzMangaModule(BaseModule):
             )
             cursor = dict_get_recursive(chapters_json, "nextCursor")
 
-        return MangaDetail(title, [alt_titles], chapters)
+        return MangaDetail(title, alt_titles, chapters)
 
     class MangaPageResponse(TypedDict):
         images: list[EzMangaModule.MangaPageResponseImage]
