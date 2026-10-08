@@ -1173,7 +1173,7 @@ async def manual_source_editing(
             print("Link:", link)
             print("Alt Titles:")
 
-            for item in str(alt_titles).splitlines():
+            for item in cast(str, alt_titles).splitlines():
                 print(item)
 
             print(
@@ -1259,7 +1259,7 @@ async def manual_source_editing(
                     "", total=None, task="MangaBaka Entry"
                 )
                 mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                    [title, *alt_titles]
+                    [title, *cast(str, alt_titles).splitlines()]
                 )
 
                 if mangabaka_entry is not None:
@@ -1284,7 +1284,7 @@ async def manual_source_editing(
                 else:
                     mangadotnet_entry = (
                         await mangadotnet_api.get_entry_by_title(
-                            [title, *alt_titles]
+                            [title, *cast(str, alt_titles).splitlines()]
                         )
                     )
 
