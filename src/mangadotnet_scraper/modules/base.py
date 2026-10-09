@@ -232,9 +232,18 @@ class BaseModule(AbstractAsyncContextManager):
         chapter_link: str,
     ) -> Sequence[MangaPage]:
         try:
-            return await self.on_fetch_manga_pages(
+            result = await self.on_fetch_manga_pages(
                 manga_id, manga_link, chapter_id, chapter_link
             )
+
+            seen = set()
+
+            if any(i in seen or seen.add(i.page_number) for i in result):
+                raise FetchError(
+                    "There are duplicate page number which can result in artifact problems."
+                )
+
+            return result
         except FetchError:
             raise
         except Exception as error:
