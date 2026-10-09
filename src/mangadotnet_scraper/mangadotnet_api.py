@@ -509,17 +509,16 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     @retryable_client_session
     async def get_id_from_mangabaka_id(self, mangabaka_id: int) -> int | None:
-        while True:
-            async with self._session.post(
-                "/api/manga/fetch-mangabaka",
-                json={"url": f"https://mangabaka.org/{mangabaka_id}"},
-            ) as response:
-                if response.status == 409:
-                    json = await response.json()
-                    return dict_get_recursive(json, "duplicate", "id")
-                else:
-                    await self._raise_for_status(response)
-                    return None
+        async with self._session.post(
+            "/api/manga/fetch-mangabaka",
+            json={"url": f"https://mangabaka.org/{mangabaka_id}"},
+        ) as response:
+            if response.status == 409:
+                json = await response.json()
+                return dict_get_recursive(json, "duplicate", "id")
+            else:
+                await self._raise_for_status(response)
+                return None
 
     @retryable_client_session
     async def get_entry_by_id(

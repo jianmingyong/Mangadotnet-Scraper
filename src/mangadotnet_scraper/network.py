@@ -65,7 +65,7 @@ def default_retryable_status(error: ClientResponseError) -> bool:
     ):
         return True
 
-    return error.status == 408 or error.status == 504
+    return error.status == 408 or error.status == 429 or error.status == 504
 
 
 def retryable_client_session[**P, R](
