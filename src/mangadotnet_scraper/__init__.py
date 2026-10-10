@@ -54,7 +54,8 @@ def initialize() -> None:
         asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
-    except Exception:
+    except Exception as error:
+        print(error)
         logging.getLogger(__name__).exception("Unhandled exception caught")
 
 
@@ -1213,6 +1214,8 @@ async def manual_source_editing(
                 await show_update_mapping(rowid)
             elif selection == 2:
                 data.update_module_manga_upload_status(rowid, not skip_upload)
+            elif selection == 3:
+                await fetch_chapters(rowid)
 
     async def show_update_mapping(rowid: int) -> None:
         def check_for_int_or_skip(input: str) -> bool:
@@ -1390,5 +1393,135 @@ async def manual_source_editing(
                     )
                     progress.print("Success")
                     return
+
+    async def fetch_chapters(rowid: int) -> None:
+        (
+            _rowid,
+            _module_id,
+            manga_id,
+            link,
+            title,
+            _alt_titles,
+            mangabaka_id,
+            mangadotnet_id,
+            _last_checked,
+            _manual_override,
+            _skip_upload,
+        ) = data.get_module_manga(rowid).fetchone()
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("Fetching {task.fields[task]}", markup=False),
+            transient=True,
+        ) as progress:
+            progress.add_task("", total=None, task=title)
+
+            try:
+                detail = await module.fetch_manga_detail(manga_id, link)
+
+                chapters: list[ModuleChapter] = []
+
+                for chapter in detail.chapters:
+                    chapters.append(
+                        ModuleChapter(
+                            chapter.language,
+                            chapter.group,
+                            chapter.type,
+                            chapter.chapter_number,
+                            chapter.volume_number,
+                            chapter.title,
+                            chapter.link,
+                            chapter.chapter_id,
+                            False,
+                        )
+                    )
+
+                async def is_chapter_uploaded(
+                    chapter: ModuleChapter,
+                ) -> bool:
+                    if chapter.type == "chapter":
+                        mangadotnet_chapters = (
+                            await mangadotnet_api.get_chapters_by_id(
+                                mangadotnet_id
+                            )
+                        )
+
+                        for mangadotnet_chapter in mangadotnet_chapters:
+                            mangadotnet_language = dict_get_recursive(
+                                mangadotnet_chapter, "language"
+                            )
+                            mangadotnet_chapter_number = dict_get_recursive(
+                                mangadotnet_chapter, "chapter_number"
+                            )
+
+                            if (
+                                chapter.language == mangadotnet_language
+                                and chapter.chapter_number
+                                == mangadotnet_chapter_number
+                            ):
+                                for mangadotnet_group in dict_get_recursive(
+                                    mangadotnet_chapter,
+                                    "groups",
+                                    default=[],
+                                ):
+                                    if (
+                                        chapter.scanlator_group
+                                        == dict_get_recursive(
+                                            mangadotnet_group, "name"
+                                        )
+                                    ):
+                                        return True
+                    else:
+                        mangadotnet_volumes = (
+                            await mangadotnet_api.get_volumes_by_id(
+                                mangadotnet_id
+                            )
+                        )
+
+                        for mangadotnet_volume in mangadotnet_volumes:
+                            mangadotnet_language = dict_get_recursive(
+                                mangadotnet_volume, "language"
+                            )
+                            mangadotnet_volume_number = dict_get_recursive(
+                                mangadotnet_volume, "volume_number"
+                            )
+
+                            if (
+                                chapter.language == mangadotnet_language
+                                and chapter.volume_number
+                                == mangadotnet_volume_number
+                            ):
+                                for mangadotnet_group in dict_get_recursive(
+                                    mangadotnet_volume,
+                                    "groups",
+                                    default=[],
+                                ):
+                                    if (
+                                        chapter.scanlator_group
+                                        == dict_get_recursive(
+                                            mangadotnet_group, "name"
+                                        )
+                                    ):
+                                        return True
+
+                    return False
+
+                if mangadotnet_id is not None:
+                    for chapter in chapters:
+                        chapter.uploaded = await is_chapter_uploaded(chapter)
+
+                module_manga = ModuleManga(
+                    detail.title,
+                    detail.alt_titles,
+                    mangabaka_id,
+                    mangadotnet_id,
+                    chapters,
+                )
+
+                data.add_module_manga(rowid, module_manga)
+                progress.print(f"Success fetching {title}")
+            except Exception:
+                progress.print(f"Error fetching {title}")
+                logging.getLogger().exception(f"Error fetching {title}")
 
     await show_initial_menu()

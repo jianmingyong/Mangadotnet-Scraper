@@ -82,9 +82,9 @@ def retryable_client_session[**P, R](
         for retry in range(max_retry):
             try:
                 return await async_func(*args, **kwargs)
-            except ClientConnectionError, TimeoutError:
+            except OSError, ClientConnectionError:
                 logging.getLogger(__name__).error(
-                    f"Client failed to connect. Retry attempt {retry + 1}/{max_retry}"
+                    f"Connection lost. Retry attempt {retry + 1}/{max_retry}"
                 )
                 await sleep(retry_wait_duration * (retry + 1))
             except ClientResponseError as error:
@@ -124,31 +124,29 @@ class RateLimitedMiddleware(Middleware):
     ) -> ClientResponse:
         response = await handler(request)
 
-        if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
-            async with self._lock:
-                response = await handler(request)
+        if response.status != self._TOO_MANY_REQUEST_STATUS_CODE:
+            return response
 
-                if response.status == self._TOO_MANY_REQUEST_STATUS_CODE:
-                    retry_timer = response.headers.get(
-                        self._RETRY_AFTER_HEADER
-                    )
+        async with self._lock:
+            response = await handler(request)
 
-                    if retry_timer is None or (
-                        retry_timer is not None and not retry_timer.isnumeric()
-                    ):
-                        retry_timer = self._retry_wait_duration
-                    else:
-                        retry_timer = int(retry_timer)
+            if response.status != self._TOO_MANY_REQUEST_STATUS_CODE:
+                return response
 
-                    logging.getLogger(__name__).debug(
-                        f"Request rate limited. Retrying after {retry_timer} seconds..."
-                    )
+            retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
 
-                    await sleep(retry_timer)
+            if retry_timer is not None and retry_timer.isnumeric():
+                retry_timer = int(retry_timer)
+            else:
+                retry_timer = self._retry_wait_duration
 
-                    return await handler(request)
+            logging.getLogger(__name__).error(
+                f"Request rate limited. Retrying after {retry_timer} seconds..."
+            )
 
-        return response
+            await sleep(retry_timer)
+
+            return await handler(request)
 
 
 class CloudflareMiddleware(Middleware):
@@ -179,22 +177,25 @@ class CloudflareMiddleware(Middleware):
 
         response = await update_and_request()
 
-        if response.headers.get("cf-mitigated") == "challenge":
-            async with self._lock:
-                response = await update_and_request()
+        if response.headers.get("cf-mitigated") != "challenge":
+            return response
 
-                if response.headers.get("cf-mitigated") == "challenge":
-                    logging.getLogger(__name__).debug(
-                        "Request requires cloudflare challenge. Attempting to get cloudflare cookies..."
-                    )
+        async with self._lock:
+            response = await update_and_request()
 
-                    data = await get_cloudflare_cookies(
-                        str(request.url), self._user_agent
-                    )
+            if response.headers.get("cf-mitigated") != "challenge":
+                return response
 
-                    if data is not None:
-                        self._user_agent = data[0]
-                        self._cookies.update({request.host: data[1]})
-                        return await update_and_request()
+            logging.getLogger(__name__).error(
+                "Request requires cloudflare challenge. Attempting to get cloudflare cookies..."
+            )
 
-        return response
+            data = await get_cloudflare_cookies(
+                str(request.url), self._user_agent
+            )
+
+            if data is not None:
+                self._user_agent = data[0]
+                self._cookies.update({request.host: data[1]})
+
+            return await update_and_request()
