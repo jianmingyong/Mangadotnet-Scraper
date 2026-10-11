@@ -6,11 +6,11 @@ class ArtLapsaModule(KeyoAppTemplate):
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(
             config,
+            group_name="Art Lapsa",
             module_id="art_lapsa",
             display_name="Art Lapsa",
             language="en",
             version=1,
             base_url="https://artlapsa.com",
-            group_name="Art Lapsa",
             base_cdn_url="https://cdn.artlapsa.com",
         )

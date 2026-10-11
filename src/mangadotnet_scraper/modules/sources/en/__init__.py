@@ -6,9 +6,13 @@ from mangadotnet_scraper.modules.sources.en.hijala_scans import (
 )
 from mangadotnet_scraper.modules.sources.en.hive_scans import HiveScansModule
 from mangadotnet_scraper.modules.sources.en.ken_scans import KenScansModule
+from mangadotnet_scraper.modules.sources.en.kitsune_dawn import (
+    KitsuneDawnModule,
+)
 from mangadotnet_scraper.modules.sources.en.magus_manga import MagusMangaModule
 from mangadotnet_scraper.modules.sources.en.nyx_scans import NyxScansModule
 from mangadotnet_scraper.modules.sources.en.orion_scans import OrionScansModule
+from mangadotnet_scraper.modules.sources.en.qi_scans import QiScansModule
 from mangadotnet_scraper.modules.sources.en.rena_scans import RenaScansModule
 from mangadotnet_scraper.modules.sources.en.rinko_comics import (
     RinkoComicsModule,
@@ -26,9 +30,11 @@ ModuleManager.register_module(EzMangaModule)
 ModuleManager.register_module(HijalaScansModule)
 ModuleManager.register_module(HiveScansModule)
 ModuleManager.register_module(KenScansModule)
+ModuleManager.register_module(KitsuneDawnModule)
 ModuleManager.register_module(MagusMangaModule)
 ModuleManager.register_module(NyxScansModule)
 ModuleManager.register_module(OrionScansModule)
+ModuleManager.register_module(QiScansModule)
 ModuleManager.register_module(RenaScansModule)
 ModuleManager.register_module(RinkoComicsModule)
 ModuleManager.register_module(RitharScansModule)

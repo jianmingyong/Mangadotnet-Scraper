@@ -6,11 +6,11 @@ class MagusMangaModule(IkenTemplate):
     def __init__(self, config: MangaDotNetScraperConfig):
         super().__init__(
             config,
+            group_name="MagusManga",
             module_id="magus_manga",
             display_name="Magus Manga",
             language="en",
             version=1,
             base_url="https://magustoon.org",
             base_api_url="https://api.magustoon.org",
-            group_name="MagusManga",
         )
