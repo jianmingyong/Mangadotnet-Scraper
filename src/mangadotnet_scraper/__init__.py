@@ -88,7 +88,10 @@ async def initialize_async() -> None:
                             Choice("Fetch Listing", 1),
                             Choice("Fetch Listing Details With Mapping", 2),
                             Choice("Fetch Listing Details Without Mapping", 3),
-                            Choice("Manual Mapping", 5),
+                            Choice(
+                                "Manual Source Mapping (Only Unmapped Entries)",
+                                5,
+                            ),
                             Choice("Manual Source Editing", 7),
                             Choice("Upload", 4),
                             Choice("Settings", 6),
@@ -97,7 +100,7 @@ async def initialize_async() -> None:
                         use_shortcuts=True,
                     ).ask_async()
 
-                    if selection is None:
+                    if selection is None or selection == -1:
                         break
 
                     if selection == 1:
@@ -218,27 +221,27 @@ async def initialize_async() -> None:
                                     module, config, data, mangadotnet_api
                                 )
                     elif selection == 5:
-                        selection = await questionary.select(
-                            "Which Module(s) to Manual Mapping",
-                            choices=[
-                                *generate_choices("Map"),
-                                Choice("Back", -1),
-                            ],
-                        ).ask_async()
+                        while True:
+                            selection = await questionary.select(
+                                "Which Module(s) to Manual Mapping",
+                                choices=[
+                                    *generate_choices("Map"),
+                                    Choice("Back", -1),
+                                ],
+                            ).ask_async()
 
-                        if selection is None:
-                            continue
-
-                        if selection == -1:
-                            continue
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await manual_entry_matching(
-                                    module,
-                                    data,
-                                    mangabaka_api,
-                                    mangadotnet_api,
-                                )
+                            if selection is None or selection == -1:
+                                break
+                            else:
+                                async with manager.get_module(
+                                    selection
+                                ) as module:
+                                    await manual_entry_matching(
+                                        module,
+                                        data,
+                                        mangabaka_api,
+                                        mangadotnet_api,
+                                    )
                     elif selection == 6:
                         selection = await questionary.select(
                             "What would you like to do?",
@@ -319,7 +322,10 @@ async def fetch_module_listing(
         try:
             async for listing in module.fetch_manga_listing():
                 progress.print(
-                    "Adding:", listing.title, markup=False, highlight=False
+                    "Adding:",
+                    listing.title,
+                    markup=False,
+                    highlight=False,
                 )
                 data.add_module_listing(
                     module.module_id,
@@ -328,9 +334,17 @@ async def fetch_module_listing(
                     listing.link,
                 )
 
-            progress.print(f"Done fetching {module.display_name} Listing")
+            progress.print(
+                f"Done fetching {module.display_name} Listing",
+                markup=False,
+                highlight=False,
+            )
         except Exception:
-            progress.print(f"Error fetching {module.display_name} Listing")
+            progress.print(
+                f"Error fetching {module.display_name} Listing",
+                markup=False,
+                highlight=False,
+            )
             logging.getLogger(__name__).exception(
                 f"Error fetching {module.display_name} Listing"
             )
@@ -987,121 +1001,233 @@ async def manual_entry_matching(
     mangabaka_api: MangaBakaApi,
     mangadotnet_api: MangaDotNetApi,
 ) -> None:
-    while True:
-        _count, module_listing = data.get_module_listing_non_mapped(
-            module.module_id
+    async def show_initial_menu() -> None:
+        while True:
+            _count, module_listing = data.get_module_listing_non_mapped(
+                module.module_id
+            )
+
+            choices = [
+                Choice(
+                    f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
+                    rowid,
+                )
+                for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
+            ]
+
+            selection = await questionary.select(
+                "What would you like to do?",
+                choices=[
+                    *choices,
+                    Choice("Back", -1),
+                ],
+                use_jk_keys=False,
+                use_search_filter=True,
+            ).ask_async()
+
+            if selection is None or selection == -1:
+                break
+            else:
+                await show_update_mapping(selection)
+
+    async def show_update_mapping(rowid: int) -> None:
+        def check_for_int_or_skip(input: str) -> bool:
+            return (
+                input.lower().strip() == "skip"
+                or input.lower().strip() == "s"
+                or input.isdigit()
+            )
+
+        (
+            _rowid,
+            _module_id,
+            manga_id,
+            link,
+            title,
+            alt_titles,
+            mangabaka_id,
+            mangadotnet_id,
+            _last_checked,
+            _manual_override,
+            _skip_upload,
+        ) = data.get_module_manga(rowid).fetchone()
+
+        print(f"[{rowid}] {title}")
+        print("Manga Id:", manga_id)
+        print("Link:", link)
+        print("Alt Titles:")
+
+        if alt_titles is None:
+            print("== No alt titles available ==")
+        else:
+            for item in cast(str, alt_titles).splitlines():
+                print(item)
+
+        print(
+            "MangaBaka Id:",
+            mangabaka_id if mangabaka_id is not None else "NULL",
         )
-
-        unmapped_listing = [
-            (
-                rowid,
-                manga_id,
-                link,
-                title,
-                alt_titles,
-                mangabaka_id,
-                mangadotnet_id,
-            )
-            for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
-        ]
-
-        choices = [
-            Choice(
-                f"[{rowid}] {title} [+{len(str(alt_titles).splitlines())} Alt Titles]",
-                rowid,
-            )
-            for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in unmapped_listing
-        ]
+        print(
+            "MangaDotNet Id:",
+            mangadotnet_id if mangadotnet_id is not None else "NULL",
+        )
 
         selection = await questionary.select(
             "What would you like to do?",
             choices=[
-                *choices,
-                Choice("Quit", -1),
+                Choice("Try auto mapping", 1),
+                Choice("Manual mapping (via MangaBaka)", 2),
+                Choice("Manual mapping (via MangaDotNet)", 3),
+                Choice("Back", -1),
             ],
-            use_jk_keys=False,
-            use_search_filter=True,
+            use_shortcuts=True,
         ).ask_async()
 
-        if selection == -1:
-            break
-        else:
-            entry = next(filter(lambda x: x[0] == selection, unmapped_listing))
-
-            print(f"[{entry[0]}] {entry[3]}")
-            print("Link:", entry[2])
-            print("Alt Titles:")
-
-            for item in str(entry[4]).splitlines():
-                print(item)
-
-            def check_for_int_or_skip(input: str) -> bool:
-                return (
-                    input.lower().strip() == "skip"
-                    or input.lower().strip() == "s"
-                    or input.isdigit()
+        if selection is None or selection == -1:
+            return
+        elif selection == 1:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("Fetching {task.fields[task]}", markup=False),
+                transient=True,
+            ) as progress:
+                task = progress.add_task(
+                    "", total=None, task="MangaBaka Entry"
+                )
+                mangabaka_entry = await mangabaka_api.get_entry_by_title(
+                    [title, *cast(str, alt_titles).splitlines()]
                 )
 
+                if mangabaka_entry is not None:
+                    mangabaka_id = dict_get_recursive(mangabaka_entry, "id")
+
+                progress.update(task, task="MangaDotNet Entry")
+
+                if mangabaka_id is not None:
+                    mangadotnet_id = (
+                        await mangadotnet_api.get_id_from_mangabaka_id(
+                            mangabaka_id
+                        )
+                    )
+
+                    if mangadotnet_id is None:
+                        response = await mangadotnet_api.create_from_mangabaka(
+                            mangabaka_id
+                        )
+                        mangadotnet_id = dict_get_recursive(
+                            response, "manga", "id"
+                        )
+                else:
+                    mangadotnet_entry = (
+                        await mangadotnet_api.get_entry_by_title(
+                            [title, *cast(str, alt_titles).splitlines()]
+                        )
+                    )
+
+                    if mangadotnet_entry is not None:
+                        mangadotnet_id = dict_get_recursive(
+                            mangadotnet_entry, "manga", "id"
+                        )
+
+                if mangabaka_id is None and mangadotnet_id is None:
+                    progress.print(
+                        "Unable to find manga... Please use manual mapping."
+                    )
+                    return
+
+                data.update_manual_mapping(rowid, mangabaka_id, mangadotnet_id)
+                progress.print("Success")
+        elif selection == 2:
             while True:
                 selection: str = await questionary.text(
-                    "Enter MangaBaka Id or Skip:",
+                    "Enter MangaBaka Id:",
                     validate=check_for_int_or_skip,
+                    instruction="Enter MangaBaka Id to continue or s to cancel.",
                 ).ask_async()
 
-                if selection is None:
-                    break
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("Fetching {task.fields[task]}", markup=False),
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task(
+                        "", total=None, task="MangaBaka Entry"
+                    )
 
-                if selection == "skip" or selection == "s":
-                    break
-                else:
-                    with Progress(
-                        SpinnerColumn(),
-                        TextColumn(
-                            "Fetching {task.fields[task]}", markup=False
-                        ),
-                        transient=True,
-                    ) as progress:
-                        task = progress.add_task(
-                            "", total=None, task="MangaBaka Entry"
+                    mangabaka_id = int(selection)
+
+                    try:
+                        await mangabaka_api.get_entry_by_id(mangabaka_id)
+                    except ClientResponseError as error:
+                        progress.print(error.message, markup=False)
+                        continue
+
+                    progress.update(task, task="MangaDotNet Entry")
+
+                    mangadotnet_id = (
+                        await mangadotnet_api.get_id_from_mangabaka_id(
+                            mangabaka_id
                         )
+                    )
 
-                        mangabaka_id = int(selection)
-
-                        try:
-                            await mangabaka_api.get_entry_by_id(mangabaka_id)
-                        except ClientResponseError as error:
-                            progress.print(error.message, markup=False)
-                            continue
-
-                        progress.update(task, task="MangaDotNet Entry")
-
+                    if mangadotnet_id is None:
+                        response = await mangadotnet_api.create_from_mangabaka(
+                            mangabaka_id
+                        )
                         mangadotnet_id = (
-                            await mangadotnet_api.get_id_from_mangabaka_id(
-                                mangabaka_id
-                            )
+                            response["manga"]["id"]
+                            if response["success"] == True
+                            else None
                         )
 
-                        if mangadotnet_id is None:
-                            response = (
-                                await mangadotnet_api.create_from_mangabaka(
-                                    mangabaka_id
-                                )
-                            )
-                            mangadotnet_id = (
-                                response["manga"]["id"]
-                                if response["success"] == True
-                                else None
-                            )
-
-                        if mangadotnet_id is None:
-                            progress.print("Unable to create mangadot id...")
-                            break
-
-                        data.update_manual_mapping(
-                            entry[0], mangabaka_id, mangadotnet_id
+                    if mangadotnet_id is None:
+                        progress.print(
+                            "Unable to create mangadot id. Please try again later"
                         )
-                        progress.print("Success")
                         break
+
+                    data.update_manual_mapping(
+                        rowid, mangabaka_id, mangadotnet_id
+                    )
+                    progress.print("Success")
+                    return
+        elif selection == 3:
+            while True:
+                selection: str = await questionary.text(
+                    "Enter MangaDotNet Id:",
+                    validate=check_for_int_or_skip,
+                    instruction="Enter MangaDotNet Id to continue or s to cancel.",
+                ).ask_async()
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("Fetching {task.fields[task]}", markup=False),
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task(
+                        "", total=None, task="MangaDotNet Entry"
+                    )
+
+                    progress.update(task, task="MangaDotNet Entry")
+
+                    mangadotnet_id = int(selection)
+
+                    try:
+                        await mangadotnet_api.get_entry_by_id(mangadotnet_id)
+                    except ClientResponseError:
+                        mangadotnet_id = None
+
+                    if mangadotnet_id is None:
+                        progress.print("Unable to find mangadotnet entry.")
+                        break
+
+                    data.update_manual_mapping(
+                        rowid, mangabaka_id, mangadotnet_id
+                    )
+                    progress.print("Success")
+                    return
+
+    await show_initial_menu()
 
 
 async def manual_source_editing(
@@ -1114,25 +1240,15 @@ async def manual_source_editing(
         while True:
             _count, module_listing = data.get_module_listing(
                 module.module_id,
-                columns=[
-                    "rowid",
-                    "manga_id",
-                    "link",
-                    "title",
-                    "alt_titles",
-                    "mangabaka_id",
-                    "mangadotnet_id",
-                    "last_checked",
-                    "skip_upload",
-                ],
+                columns=["rowid", "title", "alt_titles"],
             )
 
             choices = [
                 Choice(
-                    f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines())} Alt Titles]",
+                    f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
                     rowid,
                 )
-                for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id, last_checked, skip_upload in module_listing.fetchall()
+                for rowid, title, alt_titles in module_listing.fetchall()
             ]
 
             selection = await questionary.select(
@@ -1174,8 +1290,11 @@ async def manual_source_editing(
             print("Link:", link)
             print("Alt Titles:")
 
-            for item in cast(str, alt_titles).splitlines():
-                print(item)
+            if alt_titles is None:
+                print("== No alt titles available ==")
+            else:
+                for item in cast(str, alt_titles).splitlines():
+                    print(item)
 
             print(
                 "MangaBaka Id:",
@@ -1201,8 +1320,8 @@ async def manual_source_editing(
                     Choice("Update Mapping", 1),
                     Choice("Enable/Disable Upload", 2),
                     Choice("Fetch Chapters", 3),
-                    Choice("Modify Chapter", 4),
-                    Choice("Upload", 5),
+                    # Choice("Modify Chapter", 4),
+                    # Choice("Upload", 5),
                     Choice("Back", -1),
                 ],
                 use_shortcuts=True,
@@ -1411,10 +1530,10 @@ async def manual_source_editing(
 
         with Progress(
             SpinnerColumn(),
-            TextColumn("Fetching {task.fields[task]}", markup=False),
+            TextColumn("Fetching {task.description}", markup=False),
             transient=True,
         ) as progress:
-            progress.add_task("", total=None, task=title)
+            progress.add_task(title, total=None)
 
             try:
                 detail = await module.fetch_manga_detail(manga_id, link)
@@ -1519,9 +1638,13 @@ async def manual_source_editing(
                 )
 
                 data.add_module_manga(rowid, module_manga)
-                progress.print(f"Success fetching {title}")
+                progress.print(
+                    f"Success fetching {title}", markup=False, highlight=False
+                )
             except Exception:
-                progress.print(f"Error fetching {title}")
+                progress.print(
+                    f"Error fetching {title}", markup=False, highlight=False
+                )
                 logging.getLogger().exception(f"Error fetching {title}")
 
     await show_initial_menu()
