@@ -1437,6 +1437,9 @@ async def manual_source_editing(
                     instruction="Enter MangaBaka Id to continue or s to cancel.",
                 ).ask_async()
 
+                if selection == "skip" or selection == "s":
+                    break
+
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("Fetching {task.fields[task]}", markup=False),
@@ -1490,6 +1493,9 @@ async def manual_source_editing(
                     validate=check_for_int_or_skip,
                     instruction="Enter MangaDotNet Id to continue or s to cancel.",
                 ).ask_async()
+
+                if selection == "skip" or selection == "s":
+                    break
 
                 with Progress(
                     SpinnerColumn(),
