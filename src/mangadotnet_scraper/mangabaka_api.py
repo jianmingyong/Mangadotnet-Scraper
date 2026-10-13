@@ -2,7 +2,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import TracebackType
-from typing import Final, Literal, ReadOnly, TypedDict
+from typing import Final, Literal, ReadOnly, TypedDict, cast
 
 from aiohttp import ClientResponse, ClientResponseError, ClientSession
 
@@ -105,7 +105,12 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     for inner_title in dict_get_recursive(
                         data, "titles", default=[]
                     ):
-                        if title == dict_get_recursive(inner_title, "title"):
+                        if (
+                            title.casefold()
+                            == cast(
+                                str, dict_get_recursive(inner_title, "title")
+                            ).casefold()
+                        ):
                             matches.append(data)
                             break
 
@@ -129,7 +134,12 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     for inner_title in dict_get_recursive(
                         data, "titles", default=[]
                     ):
-                        if title == dict_get_recursive(inner_title, "title"):
+                        if (
+                            title.casefold()
+                            == cast(
+                                str, dict_get_recursive(inner_title, "title")
+                            ).casefold()
+                        ):
                             matches.append(data)
                             break
 

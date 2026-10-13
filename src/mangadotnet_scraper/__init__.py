@@ -102,8 +102,7 @@ async def initialize_async() -> None:
 
                     if selection is None or selection == -1:
                         break
-
-                    if selection == 1:
+                    elif selection == 1:
                         selection = await questionary.select(
                             "Which Module(s) to Fetch Listing",
                             choices=[
@@ -113,15 +112,12 @@ async def initialize_async() -> None:
                             ],
                         ).ask_async()
 
-                        if selection is None:
+                        if selection is None or selection == -2:
                             continue
-
-                        if selection == -1:
+                        elif selection == -1:
                             for module in manager.get_enabled_modules():
                                 async with module:
                                     await fetch_module_listing(module, data)
-                        elif selection == -2:
-                            continue
                         else:
                             async with manager.get_module(selection) as module:
                                 await fetch_module_listing(module, data)
@@ -135,10 +131,9 @@ async def initialize_async() -> None:
                             ],
                         ).ask_async()
 
-                        if selection is None:
+                        if selection is None or selection == -2:
                             continue
-
-                        if selection == -1:
+                        elif selection == -1:
                             for module in manager.get_enabled_modules():
                                 async with module:
                                     await fetch_module_listing_details(
@@ -147,8 +142,6 @@ async def initialize_async() -> None:
                                         mangabaka_api,
                                         mangadotnet_api,
                                     )
-                        elif selection == -2:
-                            continue
                         else:
                             async with manager.get_module(selection) as module:
                                 await fetch_module_listing_details(
@@ -167,10 +160,9 @@ async def initialize_async() -> None:
                             ],
                         ).ask_async()
 
-                        if selection is None:
+                        if selection is None or selection == -2:
                             continue
-
-                        if selection == -1:
+                        elif selection == -1:
                             for module in manager.get_enabled_modules():
                                 async with module:
                                     await fetch_module_listing_details(
@@ -180,8 +172,6 @@ async def initialize_async() -> None:
                                         mangadotnet_api,
                                         skip_mapping=True,
                                     )
-                        elif selection == -2:
-                            continue
                         else:
                             async with manager.get_module(selection) as module:
                                 await fetch_module_listing_details(
@@ -201,10 +191,9 @@ async def initialize_async() -> None:
                             ],
                         ).ask_async()
 
-                        if selection is None:
+                        if selection is None or selection == -2:
                             continue
-
-                        if selection == -1:
+                        elif selection == -1:
                             for module in manager.get_enabled_modules():
                                 async with module:
                                     await upload_chapters(
@@ -213,8 +202,6 @@ async def initialize_async() -> None:
                                         data,
                                         mangadotnet_api,
                                     )
-                        elif selection == -2:
-                            continue
                         else:
                             async with manager.get_module(selection) as module:
                                 await upload_chapters(
@@ -252,10 +239,9 @@ async def initialize_async() -> None:
                             use_shortcuts=True,
                         ).ask_async()
 
-                        if selection is None:
+                        if selection is None or selection == -1:
                             continue
-
-                        if selection == 1:
+                        elif selection == 1:
                             choices = []
 
                             for module_id, module in manager.get_modules():
@@ -277,34 +263,33 @@ async def initialize_async() -> None:
                                 show_description=True,
                             ).ask_async()
 
+                            if selection is None:
+                                continue
+
                             config.enabled_modules = selection
-                        else:
-                            continue
                     elif selection == 7:
-                        selection = await questionary.select(
-                            "Which Module(s) to Manual Mapping",
-                            choices=[
-                                *generate_choices(""),
-                                Choice("Back", -1),
-                            ],
-                            use_shortcuts=True,
-                        ).ask_async()
+                        while True:
+                            selection = await questionary.select(
+                                "Which Module(s) to Manual Mapping",
+                                choices=[
+                                    *generate_choices(""),
+                                    Choice("Back", -1),
+                                ],
+                                use_shortcuts=True,
+                            ).ask_async()
 
-                        if selection is None:
-                            continue
-
-                        if selection == -1:
-                            continue
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await manual_source_editing(
-                                    module,
-                                    data,
-                                    mangabaka_api,
-                                    mangadotnet_api,
-                                )
-                    else:
-                        break
+                            if selection is None or selection == -1:
+                                break
+                            else:
+                                async with manager.get_module(
+                                    selection
+                                ) as module:
+                                    await manual_source_editing(
+                                        module,
+                                        data,
+                                        mangabaka_api,
+                                        mangadotnet_api,
+                                    )
             finally:
                 config.save_config()
 
@@ -1244,7 +1229,7 @@ async def manual_source_editing(
 ) -> None:
     async def show_initial_menu() -> None:
         while True:
-            _count, module_listing = data.get_module_listing(
+            count, module_listing = data.get_module_listing(
                 module.module_id,
                 columns=["rowid", "title", "alt_titles"],
             )
@@ -1254,11 +1239,11 @@ async def manual_source_editing(
                     f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
                     rowid,
                 )
-                for rowid, title, alt_titles in module_listing.fetchall()
+                for rowid, title, alt_titles in module_listing
             ]
 
             selection = await questionary.select(
-                "What would you like to do?",
+                f"{module.display_name} - {count} Titles | Select title to edit:",
                 choices=[
                     *choices,
                     Choice("Back", -1),
@@ -1268,9 +1253,6 @@ async def manual_source_editing(
             ).ask_async()
 
             if selection is None or selection == -1:
-                break
-
-            if selection == -1:
                 break
             else:
                 await show_manga_info_menu(selection)

@@ -556,8 +556,12 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
                     manga_entry = await self.get_entry_by_id(manga_id)
 
-                    if title == dict_get_recursive(
-                        manga_entry, "manga", "title"
+                    if (
+                        title.casefold()
+                        == cast(
+                            str,
+                            dict_get_recursive(manga_entry, "manga", "title"),
+                        ).casefold()
                     ):
                         matches.append(manga_entry)
                         continue
@@ -565,7 +569,10 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     for manga_title in dict_get_recursive(
                         manga_entry, "manga", "alt_titles", default=[]
                     ):
-                        if title == manga_title:
+                        if (
+                            title.casefold()
+                            == cast(str, manga_title).casefold()
+                        ):
                             matches.append(manga_entry)
                             break
 
