@@ -5,12 +5,7 @@ from typing import Final, Unpack, cast, override
 
 from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup, Tag
-from playwright.async_api import Browser, Error
 
-from mangadotnet_scraper.camoufox_utils import (
-    create_browser,
-    handle_cloudflare_interstitial,
-)
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import (
     BaseModule,
@@ -20,7 +15,7 @@ from mangadotnet_scraper.modules.base import (
     MangaListing,
     MangaPage,
 )
-from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
+from mangadotnet_scraper.modules.error import SeriesNotFoundError
 from mangadotnet_scraper.network import retryable_client_session
 from mangadotnet_scraper.utilities import clean_string
 
@@ -43,35 +38,14 @@ class KeyoAppTemplate(BaseModule):
 
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        async with (
-            create_browser() as browser,
-            await cast(Browser, browser).new_context() as context,
-        ):
-            page = await context.new_page()
+        async def fetch_listing_html(page: int = 1) -> str:
+            return await self.get_html("/latest", params={"page": page})
 
-            target_page = f"{self.base_url}/latest"
+        page = 1
+        has_next_page = True
 
-            response = await handle_cloudflare_interstitial(page, target_page)
-
-            if (
-                not response.ok
-                and await response.header_value("cf-mitigated") != "challenge"
-            ):
-                raise FetchError(
-                    f"Request returned {response.status} ({response.status_text}) for {target_page}"
-                )
-
-            while True:
-                try:
-                    await page.click(
-                        'a[wire\\:click\\.prevent="loadMore"]',
-                        strict=True,
-                        timeout=10000,
-                    )
-                except Error:
-                    break
-
-            html = await page.content()
+        while has_next_page:
+            html = await fetch_listing_html(page)
             soup = BeautifulSoup(html, "html.parser")
 
             elements = soup.find_all(
@@ -91,6 +65,12 @@ class KeyoAppTemplate(BaseModule):
                     clean_string(title),
                     clean_string(link),
                 )
+
+            page += 1
+            has_next_page = (
+                soup.find("a", attrs={"wire:click.prevent": "loadMore"})
+                is not None
+            )
 
     @override
     async def on_fetch_manga_detail(
