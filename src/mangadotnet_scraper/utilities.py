@@ -6,6 +6,13 @@ def clean_string(value: str) -> str:
     return value.replace("\u200f", "").strip("\r").strip("\n").strip()
 
 
+def normalize_url(url: str, base_url: str) -> str:
+    if url.startswith("/"):
+        return f"{base_url.rstrip('/')}{url}"
+    else:
+        return url
+
+
 def dict_get_recursive(
     obj: Mapping[str, Any], *keys: str, default: Any = None
 ) -> Any:

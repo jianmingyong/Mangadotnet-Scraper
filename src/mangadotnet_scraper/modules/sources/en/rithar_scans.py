@@ -1,8 +1,10 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.templates.keyoapp import KeyoAppTemplate
+from mangadotnet_scraper.modules.templates.keyoapp import (
+    KeyoAppLivewireTemplate,
+)
 
 
-class RitharScansModule(KeyoAppTemplate):
+class RitharScansModule(KeyoAppLivewireTemplate):
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
         super().__init__(
             config,

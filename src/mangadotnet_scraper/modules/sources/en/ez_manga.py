@@ -8,7 +8,7 @@ class EzMangaModule(EzManhwaTemplate):
             config,
             group_name="Ezmanga",
             module_id="ez_manga",
-            display_name="EzManga",
+            display_name="Ez Manga",
             language="en",
             version=1,
             base_url="https://ezmanga.org",

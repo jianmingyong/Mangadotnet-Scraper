@@ -17,10 +17,10 @@ from mangadotnet_scraper.modules.base import (
 )
 from mangadotnet_scraper.modules.error import SeriesNotFoundError
 from mangadotnet_scraper.network import retryable_client_session
-from mangadotnet_scraper.utilities import clean_string
+from mangadotnet_scraper.utilities import clean_string, normalize_url
 
 
-class KeyoAppTemplate(BaseModule):
+class KeyoAppLivewireTemplate(BaseModule):
     group_name: Final[str]
     base_cdn_url: Final[str]
 
@@ -55,15 +55,20 @@ class KeyoAppTemplate(BaseModule):
             for element in elements:
                 link = cast(str, element.attrs.get("href"))
                 title = cast(str, element.attrs.get("title"))
-                series_id = link[link.rfind("/") + 1 :]
 
                 if title is None or link is None:
                     continue
 
+                if link.endswith("/"):
+                    series_id = link[: link.rfind("/")]
+                    series_id = series_id[series_id.rfind("/") + 1 :]
+                else:
+                    series_id = link[link.rfind("/") + 1 :]
+
                 yield MangaListing(
                     clean_string(series_id),
                     clean_string(title),
-                    clean_string(link),
+                    normalize_url(clean_string(link), self.base_url),
                 )
 
             page += 1

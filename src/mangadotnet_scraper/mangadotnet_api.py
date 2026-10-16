@@ -805,6 +805,11 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
                     retry = 0
                     retry_duration = 5
+            except OSError:
+                # Client got disconnected and needed time to recover.
+                await sleep(retry_duration)
+                retry += 1
+                retry_duration *= 2
             except ClientError as error:
                 if isinstance(error, ClientResponseError):
                     if error.status in self._NON_RESUMABLE_ERROR:
