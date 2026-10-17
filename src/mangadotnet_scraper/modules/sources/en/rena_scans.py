@@ -14,3 +14,8 @@ class RenaScansModule(IkenTemplate):
             base_url="https://renascans.net",
             base_api_url="https://api.renascans.net",
         )
+
+    @override
+    async def initialize(self) -> None:
+        await super().initialize()
+        self.fetch_concurrency = 6
