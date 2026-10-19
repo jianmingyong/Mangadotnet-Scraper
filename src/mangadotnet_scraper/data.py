@@ -62,6 +62,13 @@ class MangaDotNetScraperData(AbstractContextManager):
                     version     INTEGER NOT NULL DEFAULT 1
                 );
 
+                CREATE TABLE IF NOT EXISTS module
+                (
+                    module_id       TEXT    NOT NULL,
+                    version         INTEGER NOT NULL DEFAULT 1,
+                    CONSTRAINT module_unique_module_id UNIQUE (module_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS module_manga
                 (
                     rowid           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
