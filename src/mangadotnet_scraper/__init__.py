@@ -988,7 +988,7 @@ async def manual_entry_matching(
 ) -> None:
     async def show_initial_menu() -> None:
         while True:
-            _count, module_listing = data.get_module_listing_non_mapped(
+            count, module_listing = data.get_module_listing_non_mapped(
                 module.module_id
             )
 
@@ -1001,7 +1001,7 @@ async def manual_entry_matching(
             ]
 
             selection = await questionary.select(
-                "What would you like to do?",
+                f"{module.display_name} - {count} Titles | Select title to edit:",
                 choices=[
                     *choices,
                     Choice("Back", -1),
@@ -1231,15 +1231,15 @@ async def manual_source_editing(
         while True:
             count, module_listing = data.get_module_listing(
                 module.module_id,
-                columns=["rowid", "title", "alt_titles"],
+                columns=["rowid", "title", "alt_titles", "mangadotnet_id"],
             )
 
             choices = [
                 Choice(
-                    f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
+                    f"[{rowid}] [{mangadotnet_id if mangadotnet_id is not None else 'NULL'}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
                     rowid,
                 )
-                for rowid, title, alt_titles in module_listing
+                for rowid, title, alt_titles, mangadotnet_id in module_listing
             ]
 
             selection = await questionary.select(
