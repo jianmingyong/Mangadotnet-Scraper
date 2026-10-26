@@ -9,6 +9,7 @@ from mangadotnet_scraper.modules.base import (
     MangaListing,
     MangaPage,
 )
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.utilities import (
     clean_alt_titles,
     clean_string,
@@ -161,3 +162,6 @@ class RenaScansModule(BaseModule):
             manga_pages.append(MangaPage(index, image, None))
 
         return manga_pages
+
+
+ModuleManager.register_module(RenaScansModule)

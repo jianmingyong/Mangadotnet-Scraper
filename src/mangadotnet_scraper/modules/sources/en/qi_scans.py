@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.ezmanhwa import EzManhwaTemplate
 
 
@@ -15,3 +16,6 @@ class QiScansModule(EzManhwaTemplate):
             base_api_url="https://api.qimanga.com",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
         )
+
+
+ModuleManager.register_module(QiScansModule)

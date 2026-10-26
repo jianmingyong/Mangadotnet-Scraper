@@ -13,6 +13,7 @@ from mangadotnet_scraper.modules.base import (
     MangaListing,
     MangaPage,
 )
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
 
 
@@ -239,3 +240,6 @@ class RinkoComicsModule(BaseModule):
             images.append(MangaPage(int(page), src, None))
 
         return images
+
+
+ModuleManager.register_module(RinkoComicsModule)

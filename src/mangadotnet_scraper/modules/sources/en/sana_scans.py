@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
@@ -14,3 +15,6 @@ class SanaScansModule(IkenTemplate):
             base_url="https://sanascans.com",
             base_api_url="https://api.sanascans.com",
         )
+
+
+ModuleManager.register_module(SanaScansModule)

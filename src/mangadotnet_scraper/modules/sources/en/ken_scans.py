@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
@@ -14,3 +15,6 @@ class KenScansModule(IkenTemplate):
             base_url="https://kencomics.com",
             base_api_url="https://api.kencomics.com",
         )
+
+
+ModuleManager.register_module(KenScansModule)

@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
@@ -14,3 +15,6 @@ class HiveScansModule(IkenTemplate):
             base_url="https://hivetoons.org",
             base_api_url="https://api.hivetoons.org",
         )
+
+
+ModuleManager.register_module(HiveScansModule)

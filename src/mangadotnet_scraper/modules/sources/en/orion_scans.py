@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
@@ -14,3 +15,6 @@ class OrionScansModule(IkenTemplate):
             base_url="https://orion-scans.com",
             base_api_url="https://api.orion-scans.com",
         )
+
+
+ModuleManager.register_module(OrionScansModule)

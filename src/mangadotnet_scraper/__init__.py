@@ -27,6 +27,7 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
+import mangadotnet_scraper.modules.sources  # noqa: F401
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.data import (
     MangaDotNetScraperData,
@@ -35,7 +36,7 @@ from mangadotnet_scraper.data import (
 )
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.modules import *
+from mangadotnet_scraper.modules.base import BaseModule
 from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
 from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.utilities import dict_get_recursive

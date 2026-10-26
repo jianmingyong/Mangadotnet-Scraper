@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.keyoapp import (
     KeyoAppLivewireTemplate,
 )
@@ -16,3 +17,6 @@ class ArtLapsaModule(KeyoAppLivewireTemplate):
             base_url="https://artlapsa.com",
             base_cdn_url="https://cdn.artlapsa.com",
         )
+
+
+ModuleManager.register_module(ArtLapsaModule)

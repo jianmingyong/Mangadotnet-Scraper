@@ -1,4 +1,5 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from mangadotnet_scraper.modules.manager import ModuleManager
 from mangadotnet_scraper.modules.templates.iken import IkenTemplate
 
 
@@ -14,3 +15,6 @@ class MagusMangaModule(IkenTemplate):
             base_url="https://magustoon.org",
             base_api_url="https://api.magustoon.org",
         )
+
+
+ModuleManager.register_module(MagusMangaModule)
