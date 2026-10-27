@@ -1,7 +1,10 @@
 from collections.abc import AsyncIterable, Mapping, Sequence
-from typing import ReadOnly, TypedDict, cast, override
+from typing import Any, ReadOnly, TypedDict, Unpack, cast, override
 
 from aiohttp import ClientResponseError
+from aiohttp.client import _RequestOptions
+from aiohttp.typedefs import StrOrURL
+from asynciolimiter import Limiter
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.base import (
@@ -13,6 +16,7 @@ from mangadotnet_scraper.modules.base import (
 )
 from mangadotnet_scraper.modules.error import SeriesNotFoundError
 from mangadotnet_scraper.modules.manager import ModuleManager
+from mangadotnet_scraper.network import retryable_client_session
 from mangadotnet_scraper.utilities import dict_get_recursive
 
 
@@ -80,6 +84,8 @@ class MangaPageResponseChapter(TypedDict):
 
 
 class MangaDexModule(BaseModule):
+    limiter: Limiter
+
     def __init__(self, config: MangaDotNetScraperConfig):
         super().__init__(
             config,
@@ -94,6 +100,28 @@ class MangaDexModule(BaseModule):
                 "Referer": "https://mangadex.org/",
             },
         )
+
+    @override
+    async def initialize(self) -> None:
+        await super().initialize()
+        self.limiter = Limiter(5)
+
+    @override
+    async def close(self) -> None:
+        await super().close()
+
+        if self.limiter is not None:
+            self.limiter.close()
+
+    @override
+    @retryable_client_session
+    async def get_json(
+        self,
+        url: StrOrURL,
+        **kwargs: Unpack[_RequestOptions],
+    ) -> Any:
+        await self.limiter.wait()
+        return await super().get_json(url, **kwargs)
 
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:

@@ -12,7 +12,8 @@ dependencies = [
     "aiohttp[speedups]>=3.14.3",
     "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.5",
-    "playwright-captcha==0.1.1"
+    "playwright-captcha==0.1.1",
+    "asynciolimiter>=1.2.0"
 ]
 
 [project.optional-dependencies]

@@ -212,9 +212,9 @@ class BaseModule(AbstractAsyncContextManager):
     ) -> MangaDetail:
         try:
             return await self.on_fetch_manga_detail(manga_id, link)
-        except FetchError:
-            raise
         except SeriesNotFoundError:
+            raise
+        except FetchError:
             raise
         except Exception as error:
             raise FetchError() from error
