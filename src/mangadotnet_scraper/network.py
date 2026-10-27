@@ -96,7 +96,7 @@ def retryable_client_session[**P, R](
             except ClientResponseError as error:
                 if retryable_status(error):
                     logging.getLogger(__name__).error(
-                        f"Client response with {error.status} ({error.message}). Retry attempt {retry + 1}/{max_retry}"
+                        f"Server response with {error.status} ({error.message}). Retry attempt {retry + 1}/{max_retry}"
                     )
                     await sleep(retry_wait_duration * (retry + 1))
                 else:

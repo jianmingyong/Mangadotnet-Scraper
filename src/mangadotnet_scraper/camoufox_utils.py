@@ -3,7 +3,7 @@ import sys
 from typing import Literal, cast
 
 from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, Error, Page, Response
+from playwright.async_api import Browser, Error, Response
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.camoufox_add_init_script.add_init_script import (
     get_addon_path,
@@ -15,7 +15,7 @@ from playwright_captcha.utils.exceptions import (
 
 
 def create_browser(
-    headless: bool | str = True, **launch_options
+    headless: bool | Literal["virtual"] = True, **launch_options
 ) -> AsyncCamoufox:
     os = sys.platform
 
@@ -40,30 +40,6 @@ def create_browser(
     )
 
 
-async def handle_cloudflare_interstitial(
-    page: Page,
-    url: str,
-    wait_until: Literal["domcontentloaded", "load", "networkidle"]
-    | None = None,
-    expected_content_selector: str | None = None,
-) -> Response:
-    async with ClickSolver(
-        framework=FrameworkType.CAMOUFOX, page=page
-    ) as solver:
-        response = cast(Response, await page.goto(url))
-
-        if await response.header_value("cf-mitigated") == "challenge":
-            await solver.solve_captcha(
-                captcha_container=page,
-                captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
-                expected_content_selector=expected_content_selector,
-            )
-
-            await page.wait_for_load_state(wait_until)
-
-        return response
-
-
 async def get_cloudflare_cookies(
     url: str, user_agent: str | None = None
 ) -> tuple[str, str] | None:
@@ -76,24 +52,24 @@ async def get_cloudflare_cookies(
         ):
             page = await context.new_page()
 
-            try:
-                response = await handle_cloudflare_interstitial(
-                    page, url, "domcontentloaded"
-                )
-            except CaptchaDetectionError, CaptchaSolvingError:
-                logging.getLogger(__name__).exception(
-                    "Failed to solve cloudflare captcha"
-                )
-                return None
+            async with ClickSolver(
+                framework=FrameworkType.CAMOUFOX, page=page
+            ) as solver:
+                response = cast(Response, await page.goto(url))
 
-            if (
-                not response.ok
-                and await response.header_value("cf-mitigated") != "challenge"
-            ):
-                logging.getLogger(__name__).error(
-                    f"Failed to get cloudflare cookies due to request {response.status} ({response.status_text}) from {url}"
-                )
-                return None
+                if await response.header_value("cf-mitigated") == "challenge":
+                    try:
+                        await solver.solve_captcha(
+                            captcha_container=page,
+                            captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                        )
+
+                        await page.wait_for_load_state("domcontentloaded")
+                    except CaptchaDetectionError, CaptchaSolvingError:
+                        logging.getLogger(__name__).error(
+                            "Failed to solve cloudflare captcha"
+                        )
+                        return None
 
             if user_agent is None:
                 user_agent = await page.evaluate("navigator.userAgent")

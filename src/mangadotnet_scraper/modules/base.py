@@ -54,7 +54,7 @@ class MangaChapter:
 class MangaPage:
     page_number: int
     image_link: str
-    data: Mapping[str, Any] | None = None
+    context_data: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,8 @@ class BaseModule(AbstractAsyncContextManager):
         )
 
     async def close(self) -> None:
-        await self.session.close()
+        if self.session is not None:
+            await self.session.close()
 
     @retryable_client_session
     async def get_html(

@@ -2,8 +2,7 @@ import json
 import mimetypes
 import re
 from collections.abc import AsyncIterable, Sequence
-from types import TracebackType
-from typing import Self, cast, override
+from typing import cast, override
 
 from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup
@@ -44,23 +43,31 @@ class SpringToonsModule(BaseModule):
             base_url="https://springtoons.org",
         )
 
-    async def __aenter__(self) -> Self:
-        self._browser = cast(Browser, await create_browser().__aenter__())
+    @override
+    async def initialize(self) -> None:
+        await super().initialize()
+
+        self._browser = cast(Browser, await create_browser().start())
         self._page = await self._browser.new_page()
         await self._page.goto("about:blank")
-        return await super().__aenter__()
 
-    async def __aexit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_value: BaseException | None,
-        _traceback: TracebackType | None,
-    ) -> None:
-        try:
-            if self._browser:
-                await self._browser.close()
-        finally:
-            await super().__aexit__(_exc_type, _exc_value, _traceback)
+    @override
+    async def close(self) -> None:
+        await super().close()
+
+        if self._page is not None:
+            await self._page.close()
+
+        if self._browser is not None:
+            await self._browser.close()
+
+    @staticmethod
+    def search_script(tag: Tag) -> bool:
+        return (
+            tag.name == "script"
+            and tag.find_parent("div", attrs={"style": "display: contents"})
+            is not None
+        )
 
     @override
     async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
@@ -77,16 +84,7 @@ class SpringToonsModule(BaseModule):
             html = await fetch_listing_html(page)
             soup = BeautifulSoup(html, "html.parser")
 
-            def search_script(tag: Tag) -> bool:
-                return (
-                    tag.name == "script"
-                    and tag.find_parent(
-                        "div", attrs={"style": "display: contents"}
-                    )
-                    is not None
-                )
-
-            script = soup.find(search_script)
+            script = soup.find(self.search_script)
 
             if script is None:
                 raise FetchError("Unable to find script data")
@@ -155,16 +153,7 @@ class SpringToonsModule(BaseModule):
             else []
         )
 
-        def search_script(tag: Tag) -> bool:
-            return (
-                tag.name == "script"
-                and tag.find_parent(
-                    "div", attrs={"style": "display: contents"}
-                )
-                is not None
-            )
-
-        script = soup.find(search_script)
+        script = soup.find(self.search_script)
 
         if script is None:
             raise FetchError("Unable to find script data")
@@ -227,16 +216,7 @@ class SpringToonsModule(BaseModule):
         html = await self.get_html(chapter_link)
         soup = BeautifulSoup(html, "html.parser")
 
-        def search_script(tag: Tag) -> bool:
-            return (
-                tag.name == "script"
-                and tag.find_parent(
-                    "div", attrs={"style": "display: contents"}
-                )
-                is not None
-            )
-
-        script = soup.find(search_script)
+        script = soup.find(self.search_script)
 
         if script is None:
             raise FetchError("Unable to find script data")
