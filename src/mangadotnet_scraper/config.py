@@ -1,6 +1,6 @@
 import json
-from collections.abc import Iterable
-from typing import Final, NotRequired, TypedDict
+from collections.abc import Iterable, Mapping
+from typing import Any, Final, NotRequired, TypedDict
 
 
 class MangaDotNetScraperConfig:
@@ -22,6 +22,8 @@ class MangaDotNetScraperConfig:
 
         enabled_modules: NotRequired[Iterable[str]]
 
+        modules: NotRequired[Mapping[str, Mapping[str, Any]]]
+
     _CONFIG_FILE_PATH: Final[str] = "./config.json"
 
     _DEFAULT_CONFIG: Final[Data] = {
@@ -36,6 +38,7 @@ class MangaDotNetScraperConfig:
         "upload_chunk_size": 4 * 1024 * 1024,
         "upload_verify_duration": 60,
         "enabled_modules": set(),
+        "modules": {},
     }
 
     def __init__(self) -> None:
@@ -43,6 +46,13 @@ class MangaDotNetScraperConfig:
 
     def _return_or_default[T](self, value: T | None, default: T) -> T:
         return value if value is not None else default
+
+    def get_module_config(self, module_id: str, key: str, default: Any) -> Any:
+        return (
+            self._return_or_default(self._data.get("modules"), {})
+            .get(module_id, {})
+            .get(key, default)
+        )
 
     @property
     def data_file(self) -> str:

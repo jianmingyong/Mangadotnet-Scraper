@@ -1002,7 +1002,7 @@ async def manual_entry_matching(
             ]
 
             selection = await questionary.select(
-                f"{module.display_name} - {count} Titles | Select title to edit:",
+                f"{module.display_name} - {count} Titles | Select title to map:",
                 choices=[
                     *choices,
                     Choice("Back", -1),
@@ -1126,9 +1126,8 @@ async def manual_entry_matching(
         elif selection == 2:
             while True:
                 selection: str = await questionary.text(
-                    "Enter MangaBaka Id:",
+                    "Enter MangaBaka Id (s to cancel):",
                     validate=check_for_int_or_skip,
-                    instruction="Enter MangaBaka Id to continue or s to cancel.",
                 ).ask_async()
 
                 if selection == "s" or selection == "skip":
@@ -1183,9 +1182,8 @@ async def manual_entry_matching(
         elif selection == 3:
             while True:
                 selection: str = await questionary.text(
-                    "Enter MangaDotNet Id:",
+                    "Enter MangaDotNet Id (s to cancel):",
                     validate=check_for_int_or_skip,
-                    instruction="Enter MangaDotNet Id to continue or s to cancel.",
                 ).ask_async()
 
                 if selection == "s" or selection == "skip":
@@ -1415,9 +1413,8 @@ async def manual_source_editing(
         elif selection == 2:
             while True:
                 selection: str = await questionary.text(
-                    "Enter MangaBaka Id:",
+                    "Enter MangaBaka Id (s to cancel):",
                     validate=check_for_int_or_skip,
-                    instruction="Enter MangaBaka Id to continue or s to cancel.",
                 ).ask_async()
 
                 if selection == "skip" or selection == "s":
@@ -1472,9 +1469,8 @@ async def manual_source_editing(
         elif selection == 3:
             while True:
                 selection: str = await questionary.text(
-                    "Enter MangaDotNet Id:",
+                    "Enter MangaDotNet Id (s to cancel):",
                     validate=check_for_int_or_skip,
-                    instruction="Enter MangaDotNet Id to continue or s to cancel.",
                 ).ask_async()
 
                 if selection == "skip" or selection == "s":
