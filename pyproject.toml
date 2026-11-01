@@ -10,16 +10,21 @@ dependencies = [
     "rich>=15.0.0",
     "questionary>=2.1.1",
     "aiohttp[speedups]>=3.14.3",
+    "asynciolimiter>=1.2.0",
     "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.5",
     "playwright-captcha==0.1.1",
-    "asynciolimiter>=1.2.0"
+    "cysqlite>=0.4.0"
 ]
 
 [project.optional-dependencies]
 dev = [
     "pyrefly>=1.2.0",
     "ruff>=0.16.5"
+]
+
+camoufox_gui = [
+    "camoufox[gui]>=0.5.5"
 ]
 
 [project.scripts]

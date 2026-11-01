@@ -105,12 +105,14 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     for inner_title in dict_get_recursive(
                         data, "titles", default=[]
                     ):
-                        if (
-                            title.casefold()
-                            == cast(
-                                str, dict_get_recursive(inner_title, "title")
-                            ).casefold()
-                        ):
+                        match_base = title.casefold().removesuffix("。")
+                        match_target = (
+                            cast(str, dict_get_recursive(inner_title, "title"))
+                            .casefold()
+                            .removesuffix("。")
+                        )
+
+                        if match_base == match_target:
                             matches.append(data)
                             break
 
@@ -134,12 +136,14 @@ class MangaBakaApi(AbstractAsyncContextManager):
                     for inner_title in dict_get_recursive(
                         data, "titles", default=[]
                     ):
-                        if (
-                            title.casefold()
-                            == cast(
-                                str, dict_get_recursive(inner_title, "title")
-                            ).casefold()
-                        ):
+                        match_base = title.casefold().removesuffix("。")
+                        match_target = (
+                            cast(str, dict_get_recursive(inner_title, "title"))
+                            .casefold()
+                            .removesuffix("。")
+                        )
+
+                        if match_base == match_target:
                             matches.append(data)
                             break
 
