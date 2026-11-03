@@ -14,7 +14,8 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "camoufox>=0.5.5",
     "playwright-captcha==0.1.1",
-    "cysqlite>=0.4.0"
+    "cysqlite>=0.4.0",
+    "pyotp>=2.10.0"
 ]
 
 [project.optional-dependencies]

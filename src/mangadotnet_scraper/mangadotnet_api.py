@@ -40,6 +40,7 @@ from playwright_captcha.utils.exceptions import (
     CaptchaDetectionError,
     CaptchaSolvingError,
 )
+from pyotp import TOTP
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
@@ -252,6 +253,7 @@ class MangaDotNetLoginMiddleware(Middleware):
                             await solver.solve_captcha(
                                 captcha_container=page,
                                 captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                                expected_content_selector="#identifier",
                             )
                         except (
                             CaptchaDetectionError,
@@ -268,6 +270,10 @@ class MangaDotNetLoginMiddleware(Middleware):
                             f"Failed to authenticate due to request {response.status} ({response.status_text})"
                         )
                         return None
+
+                    await page.evaluate(
+                        "localStorage.setItem('lastPopAt', Date.now());"
+                    )
 
                     try:
                         username_element = cast(
@@ -328,6 +334,43 @@ class MangaDotNetLoginMiddleware(Middleware):
                         and await submit_button.is_disabled()
                     ):
                         await sleep(1)
+
+                    await submit_button.click()
+
+                await sleep(10)
+
+                second_factor_header = page.get_by_text(
+                    "Confirm your second factor"
+                )
+
+                if await second_factor_header.count() >= 1:
+                    # Handle second factor
+                    otp_key = self._config.mangadotnet_otp
+
+                    if otp_key is None:
+                        logging.getLogger(__name__).error(
+                            "mangadotnet_otp key not found"
+                        )
+                        return None
+
+                    totp = TOTP(otp_key)
+
+                    input = cast(
+                        ElementHandle,
+                        await page.wait_for_selector(
+                            "#aal2-totp", strict=True
+                        ),
+                    )
+
+                    await input.type(totp.now())
+
+                    submit_button = page.get_by_text("Verify", exact=True)
+
+                    if await submit_button.count() == 0:
+                        logging.getLogger(__name__).error(
+                            "Verify button not found"
+                        )
+                        return None
 
                     await submit_button.click()
 

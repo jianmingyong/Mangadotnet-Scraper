@@ -9,6 +9,7 @@ class MangaDotNetScraperConfig:
 
         mangadotnet_username: NotRequired[str]
         mangadotnet_password: NotRequired[str]
+        mangadotnet_otp: NotRequired[str]
         mangadotnet_user_session: NotRequired[str | None]
 
         fetch_concurrency: NotRequired[int]
@@ -30,6 +31,7 @@ class MangaDotNetScraperConfig:
         "data_file": "data.db",
         "mangadotnet_username": "",
         "mangadotnet_password": "",
+        "mangadotnet_otp": "",
         "mangadotnet_user_session": None,
         "fetch_concurrency": 12,
         "download_concurrency": 12,
@@ -65,6 +67,10 @@ class MangaDotNetScraperConfig:
     @property
     def mangadotnet_password(self) -> str | None:
         return self._data.get("mangadotnet_password")
+
+    @property
+    def mangadotnet_otp(self) -> str | None:
+        return self._data.get("mangadotnet_otp")
 
     @property
     def mangadotnet_user_session(self) -> str | None:
