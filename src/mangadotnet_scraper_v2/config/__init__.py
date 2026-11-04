@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from .base import ConfigProvider
@@ -42,6 +42,10 @@ class Config:
         return self.get_config("mangadotnet_password", str)
 
     @property
+    def mangadotnet_otp(self) -> str | None:
+        return self.get_config("mangadotnet_otp", str)
+
+    @property
     def mangadotnet_user_session(self) -> str | None:
         return self.get_config("mangadotnet_user_session", str)
 
@@ -76,6 +80,9 @@ class Config:
     @property
     def enabled_sources(self) -> Sequence[str]:
         return self.get_config("enabled_sources", Sequence[str], [])
+
+    def get_source_config(self, source_id: str) -> Mapping[str, Any]:
+        return self.get_config(f"sources:{source_id}", Mapping[str, Any], {})
 
 
 __all__ = ["Config", "ConfigProvider"]

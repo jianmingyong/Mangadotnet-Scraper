@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 
-class MangaEntryEntity:
+class SourceMangaEntryEntity:
     rowid: int
     source_id: str
     manga_id: str
@@ -11,12 +11,12 @@ class MangaEntryEntity:
     link: str
     mangabaka_id: int | None
     mangadotnet_id: int | None
-    manual_override: bool
+    manual_mapping_override: bool
     skip_upload: bool
-    chapters: Sequence[MangaEntryChapterEntity]
+    chapters: Sequence[SourceMangaEntryChapterEntity]
 
 
-class MangaEntryChapterEntity:
+class SourceMangaEntryChapterEntity:
     chapter_id: str
     language: str
     group: str
