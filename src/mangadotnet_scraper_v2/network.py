@@ -14,6 +14,7 @@ from aiohttp import (
     ClientResponse,
     ClientResponseError,
     ClientSession,
+    ClientTimeout,
     TCPConnector,
 )
 
@@ -35,9 +36,6 @@ def create_client(
 
     headers = {}
 
-    if base_url is not None:
-        headers.update({"Origin": base_url})
-
     if user_agent is not None:
         headers.update({"User-Agent": user_agent})
 
@@ -45,10 +43,13 @@ def create_client(
 
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
     connector = TCPConnector(resolver=resolver, ttl_dns_cache=3600)
+    timeout = ClientTimeout(total=60, sock_connect=30)
+
     return ClientSession(
         base_url,
         connector=connector,
         headers=headers,
+        timeout=timeout,
         middlewares=[
             RateLimitedMiddleware(),
             *additional_middlewares,

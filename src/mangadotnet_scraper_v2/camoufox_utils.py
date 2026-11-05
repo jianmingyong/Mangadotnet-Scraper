@@ -1,5 +1,6 @@
 import logging
 import sys
+from asyncio import sleep
 from typing import Literal, cast
 
 from camoufox import AsyncCamoufox
@@ -59,10 +60,19 @@ async def get_cloudflare_cookies(
 
                 if await response.header_value("cf-mitigated") == "challenge":
                     try:
-                        await solver.solve_captcha(
-                            captcha_container=page,
-                            captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
-                        )
+                        # Wait for 6 seconds in case it auto solves
+                        await sleep(6)
+
+                        if (
+                            await page.locator(
+                                "input[name='cf-turnstile-response']"
+                            ).count()
+                            > 0
+                        ):
+                            await solver.solve_captcha(
+                                captcha_container=page,
+                                captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                            )
 
                         await page.wait_for_load_state("domcontentloaded")
                     except CaptchaDetectionError, CaptchaSolvingError:

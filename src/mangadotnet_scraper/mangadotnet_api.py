@@ -250,11 +250,19 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                     if cf_header == "challenge":
                         try:
-                            await solver.solve_captcha(
-                                captcha_container=page,
-                                captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
-                                expected_content_selector="#identifier",
-                            )
+                            # Wait for 6 seconds in case it auto solves
+                            await sleep(6)
+
+                            if (
+                                await page.locator(
+                                    "input[name='cf-turnstile-response']"
+                                ).count()
+                                > 0
+                            ):
+                                await solver.solve_captcha(
+                                    captcha_container=page,
+                                    captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
+                                )
                         except (
                             CaptchaDetectionError,
                             CaptchaSolvingError,
@@ -263,8 +271,6 @@ class MangaDotNetLoginMiddleware(Middleware):
                                 "Failed to solve cloudflare captcha"
                             )
                             return None
-
-                        await page.wait_for_load_state("load")
                     elif not response.ok:
                         logging.getLogger(__name__).error(
                             f"Failed to authenticate due to request {response.status} ({response.status_text})"
