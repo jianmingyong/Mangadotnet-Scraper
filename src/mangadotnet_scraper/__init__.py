@@ -1077,8 +1077,14 @@ async def manual_entry_matching(
                 task = progress.add_task(
                     "", total=None, task="MangaBaka Entry"
                 )
+
+                titles = [title]
+
+                if alt_titles is not None:
+                    titles.extend(cast(str, alt_titles).splitlines())
+
                 mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                    [title, *cast(str, alt_titles).splitlines()]
+                    titles
                 )
 
                 if mangabaka_entry is not None:
@@ -1364,8 +1370,14 @@ async def manual_source_editing(
                 task = progress.add_task(
                     "", total=None, task="MangaBaka Entry"
                 )
+
+                titles = [title]
+
+                if alt_titles is not None:
+                    titles.extend(cast(str, alt_titles).splitlines())
+
                 mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                    [title, *cast(str, alt_titles).splitlines()]
+                    titles
                 )
 
                 if mangabaka_entry is not None:
