@@ -1306,6 +1306,7 @@ async def manual_source_editing(
                     Choice("Fetch Chapters", 3),
                     # Choice("Modify Chapter", 4),
                     # Choice("Upload", 5),
+                    Choice("Delete Entry", 6),
                     Choice("Back", -1),
                 ],
                 use_shortcuts=True,
@@ -1319,6 +1320,9 @@ async def manual_source_editing(
                 data.update_module_manga_upload_status(rowid, not skip_upload)
             elif selection == 3:
                 await fetch_chapters(rowid)
+            elif selection == 6:
+                data.remove_module_manga(rowid)
+                break
 
     async def show_update_mapping(rowid: int) -> None:
         def check_for_int_or_skip(input: str) -> bool:
