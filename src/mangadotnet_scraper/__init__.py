@@ -789,14 +789,13 @@ async def upload_chapters(
                             groups = await mangadotnet_api.get_group_ids(
                                 scanlator_group
                             )
-                            if groups["success"] == True:
-                                for group in groups["groups"]:
-                                    if group["name"] == scanlator_group:
-                                        group_id = group["id"]
-                                        group_id_cache[scanlator_group] = (
-                                            group["id"]
-                                        )
-                                        break
+                            for group in groups["groups"]:
+                                if group["name"] == scanlator_group:
+                                    group_id = group["id"]
+                                    group_id_cache[scanlator_group] = (
+                                        group["id"]
+                                    )
+                                    break
 
                         if group_id is None:
                             return
