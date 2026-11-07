@@ -1108,9 +1108,7 @@ async def manual_entry_matching(
                         )
                 else:
                     mangadotnet_entry = (
-                        await mangadotnet_api.get_entry_by_title(
-                            [title, *cast(str, alt_titles).splitlines()]
-                        )
+                        await mangadotnet_api.get_entry_by_title(titles)
                     )
 
                     if mangadotnet_entry is not None:
@@ -1401,9 +1399,7 @@ async def manual_source_editing(
                         )
                 else:
                     mangadotnet_entry = (
-                        await mangadotnet_api.get_entry_by_title(
-                            [title, *cast(str, alt_titles).splitlines()]
-                        )
+                        await mangadotnet_api.get_entry_by_title(titles)
                     )
 
                     if mangadotnet_entry is not None:
