@@ -146,7 +146,6 @@ class MangaDotNetFetchMangaBakaData(TypedDict):
 
 
 class MangaDotNetCreateFromMangaBakaResponse(TypedDict):
-    success: ReadOnly[Literal[True]]
     manga: ReadOnly[MangaDotNetCreateFromMangaBakaResponseManga]
 
 

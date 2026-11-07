@@ -1159,11 +1159,7 @@ async def manual_entry_matching(
                         response = await mangadotnet_api.create_from_mangabaka(
                             mangabaka_id
                         )
-                        mangadotnet_id = (
-                            response["manga"]["id"]
-                            if response["success"] == True
-                            else None
-                        )
+                        mangadotnet_id = response["manga"]["id"]
 
                     if mangadotnet_id is None:
                         progress.print(
@@ -1450,11 +1446,7 @@ async def manual_source_editing(
                         response = await mangadotnet_api.create_from_mangabaka(
                             mangabaka_id
                         )
-                        mangadotnet_id = (
-                            response["manga"]["id"]
-                            if response["success"] == True
-                            else None
-                        )
+                        mangadotnet_id = response["manga"]["id"]
 
                     if mangadotnet_id is None:
                         progress.print(
