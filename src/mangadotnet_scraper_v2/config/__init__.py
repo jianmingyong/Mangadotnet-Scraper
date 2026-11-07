@@ -7,6 +7,58 @@ from .base import ConfigProvider
 class Config:
     _provider: Final[ConfigProvider]
 
+    @property
+    def data_file(self) -> str:
+        return self._get_config("data_file", str, "data.db")
+
+    @property
+    def mangadotnet_username(self) -> str | None:
+        return self._get_config("mangadotnet_username", str)
+
+    @property
+    def mangadotnet_password(self) -> str | None:
+        return self._get_config("mangadotnet_password", str)
+
+    @property
+    def mangadotnet_otp(self) -> str | None:
+        return self._get_config("mangadotnet_otp", str)
+
+    @property
+    def mangadotnet_user_session(self) -> str | None:
+        return self._get_config("mangadotnet_user_session", str)
+
+    @mangadotnet_user_session.setter
+    def mangadotnet_user_session(self, value: str | None) -> None:
+        self._set_config("mangadotnet_user_session", value)
+
+    @property
+    def fetch_concurrency(self) -> int:
+        return self._get_config("fetch_concurrency", int, 12)
+
+    @property
+    def download_concurrency(self) -> int:
+        return self._get_config("download_concurrency", int, 12)
+
+    @property
+    def download_max_retry(self) -> int:
+        return self._get_config("download_max_retry", int, 5)
+
+    @property
+    def upload_concurrency(self) -> int:
+        return self._get_config("upload_concurrency", int, 10)
+
+    @property
+    def upload_chunk_size(self) -> int:
+        return self._get_config("upload_chunk_size", int, 4 * 1024 * 1024)
+
+    @property
+    def upload_verify_duration(self) -> int:
+        return self._get_config("upload_verify_duration", int, 60)
+
+    @property
+    def enabled_sources(self) -> Sequence[str]:
+        return self._get_config("enabled_sources", Sequence[str], [])
+
     def __init__(self, provider: ConfigProvider) -> None:
         self._provider = provider
 
@@ -16,7 +68,10 @@ class Config:
     def save(self) -> None:
         self._provider.save()
 
-    def get_config[T](
+    def get_source_config(self, source_id: str) -> Mapping[str, Any]:
+        return self._get_config(f"sources:{source_id}", Mapping[str, Any], {})
+
+    def _get_config[T](
         self, key: str, expect_type: type[T], default: T = None
     ) -> T:
         value = self._provider.get_config(key, default)
@@ -26,63 +81,8 @@ class Config:
         else:
             return default
 
-    def set_config(self, key: str, value: Any) -> None:
+    def _set_config(self, key: str, value: Any) -> None:
         self._provider.set_config(key, value)
-
-    @property
-    def data_file(self) -> str:
-        return self.get_config("data_file", str, "data.db")
-
-    @property
-    def mangadotnet_username(self) -> str | None:
-        return self.get_config("mangadotnet_username", str)
-
-    @property
-    def mangadotnet_password(self) -> str | None:
-        return self.get_config("mangadotnet_password", str)
-
-    @property
-    def mangadotnet_otp(self) -> str | None:
-        return self.get_config("mangadotnet_otp", str)
-
-    @property
-    def mangadotnet_user_session(self) -> str | None:
-        return self.get_config("mangadotnet_user_session", str)
-
-    @mangadotnet_user_session.setter
-    def mangadotnet_user_session(self, value: str | None) -> None:
-        self.set_config("mangadotnet_user_session", value)
-
-    @property
-    def fetch_concurrency(self) -> int:
-        return self.get_config("fetch_concurrency", int, 12)
-
-    @property
-    def download_concurrency(self) -> int:
-        return self.get_config("download_concurrency", int, 12)
-
-    @property
-    def download_max_retry(self) -> int:
-        return self.get_config("download_max_retry", int, 5)
-
-    @property
-    def upload_concurrency(self) -> int:
-        return self.get_config("upload_concurrency", int, 10)
-
-    @property
-    def upload_chunk_size(self) -> int:
-        return self.get_config("upload_chunk_size", int, 4 * 1024 * 1024)
-
-    @property
-    def upload_verify_duration(self) -> int:
-        return self.get_config("upload_verify_duration", int, 60)
-
-    @property
-    def enabled_sources(self) -> Sequence[str]:
-        return self.get_config("enabled_sources", Sequence[str], [])
-
-    def get_source_config(self, source_id: str) -> Mapping[str, Any]:
-        return self.get_config(f"sources:{source_id}", Mapping[str, Any], {})
 
 
 __all__ = ["Config", "ConfigProvider"]

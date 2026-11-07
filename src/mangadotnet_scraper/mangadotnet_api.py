@@ -564,7 +564,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         ) as response:
             if response.status == 409:
                 json = await response.json()
-                return dict_get_recursive(json, "duplicate", "id")
+                return dict_get_recursive(json, "existing", "id")
             else:
                 await self._raise_for_status(response)
                 return None
@@ -879,7 +879,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         return True
 
     class MangaDotNetUploadedMangaList(TypedDict):
-        success: ReadOnly[Literal[True]]
         total: ReadOnly[int]
         uploads: ReadOnly[
             Sequence[MangaDotNetApi.MangaDotNetUploadedMangaListUpload]

@@ -5,11 +5,11 @@ from .entities import SourceMangaEntryEntity
 
 
 class DataProvider(ABC):
-    @abstractmethod
-    def initialize(self) -> None: ...
+    def initialize(self) -> None:
+        pass
 
-    @abstractmethod
-    def close(self) -> None: ...
+    def close(self) -> None:
+        pass
 
     @abstractmethod
     def add_source_entry(

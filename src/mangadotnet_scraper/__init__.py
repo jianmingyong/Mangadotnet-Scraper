@@ -792,9 +792,9 @@ async def upload_chapters(
                             for group in groups["groups"]:
                                 if group["name"] == scanlator_group:
                                     group_id = group["id"]
-                                    group_id_cache[scanlator_group] = (
-                                        group["id"]
-                                    )
+                                    group_id_cache[scanlator_group] = group[
+                                        "id"
+                                    ]
                                     break
 
                         if group_id is None:
@@ -829,6 +829,9 @@ async def upload_chapters(
                             )
                         except ClientResponseError as error:
                             if error.code == 409:
+                                logging.getLogger().info(
+                                    f"Upload Skipped (Already Uploaded): [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+                                )
                                 data.mark_chapter_uploaded(
                                     manga_rowid,
                                     language,
@@ -869,41 +872,36 @@ async def upload_chapters(
                                 )
                             )
 
-                            if uploaded_mangas["success"]:
-                                for uploaded_manga in uploaded_mangas[
-                                    "uploads"
-                                ]:
-                                    if (
-                                        type == "chapter"
-                                        and chapter_number is not None
-                                        and uploaded_manga["manga_id"]
-                                        == mangadotnet_id
-                                        and uploaded_manga["language"]
-                                        == language
-                                        and uploaded_manga["chapter_number"]
-                                        is not None
-                                        and abs(
-                                            uploaded_manga["chapter_number"]
-                                            - chapter_number
-                                        )
-                                        < 0.1
-                                        and any(
-                                            uploaded_group["id"] == group_id
-                                            for uploaded_group in uploaded_manga[
-                                                "groups"
-                                            ]
-                                        )
-                                        and uploaded_manga["type"] == "chapter"
-                                        and (
-                                            uploaded_manga["status"]
-                                            == "pending"
-                                            or uploaded_manga["status"]
-                                            == "approved"
-                                        )
-                                    ):
-                                        # Upload Success
-                                        found = True
-                                        break
+                            for uploaded_manga in uploaded_mangas["uploads"]:
+                                if (
+                                    type == "chapter"
+                                    and chapter_number is not None
+                                    and uploaded_manga["manga_id"]
+                                    == mangadotnet_id
+                                    and uploaded_manga["language"] == language
+                                    and uploaded_manga["chapter_number"]
+                                    is not None
+                                    and abs(
+                                        uploaded_manga["chapter_number"]
+                                        - chapter_number
+                                    )
+                                    < 0.1
+                                    and any(
+                                        uploaded_group["id"] == group_id
+                                        for uploaded_group in uploaded_manga[
+                                            "groups"
+                                        ]
+                                    )
+                                    and uploaded_manga["type"] == "chapter"
+                                    and (
+                                        uploaded_manga["status"] == "pending"
+                                        or uploaded_manga["status"]
+                                        == "approved"
+                                    )
+                                ):
+                                    # Upload Success
+                                    found = True
+                                    break
 
                             if found:
                                 break

@@ -1,12 +1,14 @@
 import json
-import mimetypes
 import re
 from collections.abc import AsyncIterable, Sequence
+from io import BytesIO
 from typing import cast, override
 
+import pillow_jxl  # noqa: F401
 from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup
 from bs4.element import Tag
+from PIL import Image
 from playwright.async_api import Browser, Page
 
 from mangadotnet_scraper.camoufox_utils import create_browser
@@ -245,11 +247,13 @@ class SpringToonsModule(BaseModule):
 
     @override
     async def on_fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        content_type, data = await self.download_image(
+        _, data = await self.download_image(
             page.image_link, headers={"Referer": f"{self.base_url}/"}
         )
-        filename = f"{page.page_number:03d}{mimetypes.guess_extension(content_type, False)}"
-        return MangaImage(filename, data)
+
+        with Image.open(BytesIO(data)) as image:
+            filename = f"{page.page_number:03d}.{image.format}"
+            return MangaImage(filename, data)
 
 
 ModuleManager.register_module(SpringToonsModule)

@@ -46,7 +46,7 @@ async def get_cloudflare_cookies(
 ) -> tuple[str, str] | None:
     try:
         async with (
-            create_browser(False) as browser,
+            create_browser() as browser,
             await cast(Browser, browser).new_context(
                 user_agent=user_agent
             ) as context,

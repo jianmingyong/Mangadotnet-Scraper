@@ -1,8 +1,8 @@
-import mimetypes
 from abc import abstractmethod
 from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from io import BytesIO
 from types import TracebackType
 from typing import (
     Any,
@@ -15,9 +15,11 @@ from typing import (
     Unpack,
 )
 
+import pillow_jxl  # noqa: F401
 from aiohttp import ClientMiddlewareType, ClientSession
 from aiohttp.client import _RequestOptions
 from aiohttp.typedefs import StrOrURL
+from PIL import Image
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
@@ -269,6 +271,8 @@ class BaseModule(AbstractAsyncContextManager):
             raise FetchError() from error
 
     async def on_fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        content_type, data = await self.download_image(page.image_link)
-        filename = f"{page.page_number:03d}{mimetypes.guess_extension(content_type, False)}"
-        return MangaImage(filename, data)
+        _, data = await self.download_image(page.image_link)
+
+        with Image.open(BytesIO(data)) as image:
+            filename = f"{page.page_number:03d}.{image.format}"
+            return MangaImage(filename, data)
