@@ -533,7 +533,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     async def get_user_profile(self) -> MangaDotNetProfile:
         async with self._session.get("/api/profile") as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @retryable_client_session
     async def get_chapters_by_id(
@@ -543,7 +543,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             f"/api/manga/{mangadotnet_id}/chapters/list"
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @retryable_client_session
     async def get_volumes_by_id(
@@ -553,7 +553,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             f"/api/manga/{mangadotnet_id}/volumes"
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @retryable_client_session
     async def get_id_from_mangabaka_id(self, mangabaka_id: int) -> int | None:
@@ -562,7 +562,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             json={"url": f"https://mangabaka.org/{mangabaka_id}"},
         ) as response:
             if response.status == 409:
-                json = await response.json()
+                json = await response.json(content_type=response.content_type)
                 return dict_get_recursive(json, "existing", "id")
             else:
                 await self._raise_for_status(response)
@@ -576,7 +576,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             f"/api/manga/{mangadotnet_id}"
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     async def get_entry_by_title(
         self, titles: str | Iterable[str]
@@ -592,7 +592,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 params={"search": title, "sortBy": "relevance", "limit": 10},
             ) as response:
                 await self._raise_for_status(response)
-                json = await response.json()
+                json = await response.json(content_type=response.content_type)
 
                 for manga in dict_get_recursive(
                     json, "manga_list", default=[]
@@ -662,7 +662,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             "/api/groups/lookup", params={"q": name, "limit": 10}
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @dataclass(frozen=True)
     class MangaDotNetBatchInitRequest:
@@ -704,7 +704,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             "/api/uploads/batch/init", json=request.to_dict()
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @retryable_client_session
     async def end_batch(
@@ -714,7 +714,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             f"/api/uploads/batch/{batch_id}/complete"
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     @retryable_client_session
     async def get_tus_capabilities(self) -> MangaDotNetTusCapabilities:
@@ -919,7 +919,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             params={"manga_id": mangadotnet_id, "limit": 100, "page": page},
         ) as response:
             await self._raise_for_status(response)
-            return await response.json()
+            return await response.json(content_type=response.content_type)
 
     async def create_from_mangabaka(
         self, mangabaka_id: int
@@ -931,7 +931,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 json={"url": f"https://mangabaka.org/manga/{id}"},
             ) as response:
                 await self._raise_for_status(response)
-                return await response.json()
+                return await response.json(content_type=response.content_type)
 
         mb_json = await fetch_mangabaka(mangabaka_id)
 
@@ -958,6 +958,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 "/api/manga/create-from-mangabaka", data=form_data
             ) as response:
                 await self._raise_for_status(response)
-                return await response.json()
+                return await response.json(content_type=response.content_type)
 
         return await create_entry(dict_get_recursive(mb_json, "data"))

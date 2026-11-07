@@ -133,7 +133,7 @@ class RinkoComicsModule(BaseModule):
                 },
             ) as response:
                 response.raise_for_status()
-                return await response.json()
+                return await response.json(encoding="utf-8")
 
         def find_free_chapters(tag: Tag) -> bool:
             return (
