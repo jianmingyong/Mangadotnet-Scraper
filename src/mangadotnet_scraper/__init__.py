@@ -5,7 +5,7 @@ from asyncio.taskgroups import TaskGroup
 from collections.abc import Sequence
 from io import BytesIO
 from time import asctime, gmtime, monotonic
-from typing import cast
+from typing import Any, cast
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import questionary
@@ -27,7 +27,7 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
-import mangadotnet_scraper.modules.sources  # noqa: F401
+import mangadotnet_scraper.sources.providers  # noqa: F401
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.data import (
     MangaDotNetScraperData,
@@ -36,9 +36,8 @@ from mangadotnet_scraper.data import (
 )
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.modules.base import BaseModule
-from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
-from mangadotnet_scraper.modules.manager import ModuleManager
+from mangadotnet_scraper.sources.base import BaseModule, FetchError
+from mangadotnet_scraper.sources.manager import ModuleManager
 from mangadotnet_scraper.utilities import dict_get_recursive
 
 
@@ -63,8 +62,8 @@ def initialize() -> None:
 async def initialize_async() -> None:
     get_console().rule("MangaDotNet Scraper and Uploader")
 
-    config = MangaDotNetScraperConfig()
-    config.load_config()
+    config = MangaDotNetScraperConfig("config.json")
+    config.load()
 
     with (
         MangaDotNetScraperData(config) as data,
@@ -251,7 +250,7 @@ async def initialize_async() -> None:
                                         f"{module.display_name}",
                                         module_id,
                                         checked=module_id
-                                        in config.enabled_modules,
+                                        in config.enabled_sources,
                                         description=f"{module.display_name} | Language: {module.language} | Version: {module.version}",
                                     )
                                 )
@@ -267,7 +266,7 @@ async def initialize_async() -> None:
                             if selection is None:
                                 continue
 
-                            config.enabled_modules = selection
+                            config.enabled_sources = selection
                     elif selection == 7:
                         while True:
                             selection = await questionary.select(
@@ -292,7 +291,7 @@ async def initialize_async() -> None:
                                         mangadotnet_api,
                                     )
             finally:
-                config.save_config()
+                config.save()
 
 
 async def fetch_module_listing(
@@ -576,8 +575,6 @@ async def fetch_module_listing_details(
                     )
 
                     data.add_module_manga(rowid, module_manga)
-                except SeriesNotFoundError:
-                    data.remove_module_manga(rowid)
                 except Exception:
                     total_progress.print(f"Error fetching {title}")
                     logging.getLogger().exception(f"Error fetching {title}")
@@ -1033,7 +1030,7 @@ async def manual_entry_matching(
             _last_checked,
             _manual_override,
             _skip_upload,
-        ) = data.get_module_manga(rowid).fetchone()
+        ) = cast(Any, data.get_module_manga(rowid).fetchone())
 
         print(f"[{rowid}] {title}")
         print("Manga Id:", manga_id)
@@ -1267,7 +1264,7 @@ async def manual_source_editing(
                 last_checked,
                 _manual_override,
                 skip_upload,
-            ) = data.get_module_manga(rowid).fetchone()
+            ) = cast(Any, data.get_module_manga(rowid).fetchone())
 
             print(f"[{rowid}] {title}")
             print("Manga Id:", manga_id)
@@ -1344,7 +1341,7 @@ async def manual_source_editing(
             _last_checked,
             _manual_override,
             _skip_upload,
-        ) = data.get_module_manga(rowid).fetchone()
+        ) = cast(Any, data.get_module_manga(rowid).fetchone())
 
         selection = await questionary.select(
             "What would you like to do?",
@@ -1518,7 +1515,7 @@ async def manual_source_editing(
             _last_checked,
             _manual_override,
             _skip_upload,
-        ) = data.get_module_manga(rowid).fetchone()
+        ) = cast(Any, data.get_module_manga(rowid).fetchone())
 
         with Progress(
             SpinnerColumn(),

@@ -3,7 +3,6 @@ from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from io import BytesIO
-from types import TracebackType
 from typing import (
     Any,
     Final,
@@ -22,7 +21,6 @@ from aiohttp.typedefs import StrOrURL
 from PIL import Image
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
 from mangadotnet_scraper.network import create_client, retryable_client_session
 
 
@@ -63,6 +61,10 @@ class MangaPage:
 class MangaImage:
     filename: str
     data: bytes
+
+
+class FetchError(Exception):
+    """Base class for any fetch related error"""
 
 
 class BaseModuleArgs(TypedDict):
@@ -123,6 +125,13 @@ class BaseModule(AbstractAsyncContextManager):
         self.download_concurrency = config.download_concurrency
         self.upload_concurrency = config.upload_concurrency
 
+    async def __aenter__(self) -> Self:
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        await self.close()
+
     @classmethod
     def create_module(cls, config: MangaDotNetScraperConfig) -> Self:
         if cls is BaseModule:
@@ -132,18 +141,6 @@ class BaseModule(AbstractAsyncContextManager):
 
         # pyrefly: ignore [missing-argument]
         return cls(config)
-
-    async def __aenter__(self) -> Self:
-        await self.initialize()
-        return self
-
-    async def __aexit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_value: BaseException | None,
-        _traceback: TracebackType | None,
-    ) -> None:
-        await self.close()
 
     async def initialize(self) -> None:
         self.session = create_client(
@@ -214,8 +211,6 @@ class BaseModule(AbstractAsyncContextManager):
     ) -> MangaDetail:
         try:
             return await self.on_fetch_manga_detail(manga_id, link)
-        except SeriesNotFoundError:
-            raise
         except FetchError:
             raise
         except Exception as error:

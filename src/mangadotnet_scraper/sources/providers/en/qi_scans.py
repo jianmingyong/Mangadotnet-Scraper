@@ -1,6 +1,6 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.manager import ModuleManager
-from mangadotnet_scraper.modules.templates.ezmanhwa import EzManhwaTemplate
+from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.sources.templates.ezmanhwa import EzManhwaTemplate
 
 
 class QiScansModule(EzManhwaTemplate):

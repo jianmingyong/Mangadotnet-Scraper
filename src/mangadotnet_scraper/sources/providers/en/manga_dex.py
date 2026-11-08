@@ -7,16 +7,15 @@ from aiohttp.typedefs import StrOrURL
 from asynciolimiter import Limiter
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import (
+from mangadotnet_scraper.network import retryable_client_session
+from mangadotnet_scraper.sources.base import (
     BaseModule,
     MangaChapter,
     MangaDetail,
     MangaListing,
     MangaPage,
 )
-from mangadotnet_scraper.modules.error import SeriesNotFoundError
-from mangadotnet_scraper.modules.manager import ModuleManager
-from mangadotnet_scraper.network import retryable_client_session
+from mangadotnet_scraper.sources.manager import ModuleManager
 from mangadotnet_scraper.utilities import dict_get_recursive
 
 

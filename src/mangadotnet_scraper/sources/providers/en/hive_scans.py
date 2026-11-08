@@ -1,6 +1,6 @@
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.manager import ModuleManager
-from mangadotnet_scraper.modules.templates.iken import IkenTemplate
+from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
 class HiveScansModule(IkenTemplate):

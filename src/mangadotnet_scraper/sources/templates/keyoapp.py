@@ -3,11 +3,11 @@ import re
 from collections.abc import AsyncIterable, Sequence
 from typing import Final, Unpack, cast, override
 
-from aiohttp import ClientResponseError
 from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import (
+from mangadotnet_scraper.network import retryable_client_session
+from mangadotnet_scraper.sources.base import (
     BaseModule,
     BaseModuleArgs,
     MangaChapter,
@@ -15,8 +15,6 @@ from mangadotnet_scraper.modules.base import (
     MangaListing,
     MangaPage,
 )
-from mangadotnet_scraper.modules.error import SeriesNotFoundError
-from mangadotnet_scraper.network import retryable_client_session
 from mangadotnet_scraper.utilities import clean_string, normalize_url
 
 
@@ -81,14 +79,7 @@ class KeyoAppLivewireTemplate(BaseModule):
     async def on_fetch_manga_detail(
         self, manga_id: str, link: str
     ) -> MangaDetail:
-        try:
-            html = await self.get_html(link)
-        except ClientResponseError as error:
-            if error.code == 404:
-                raise SeriesNotFoundError() from error
-            else:
-                raise
-
+        html = await self.get_html(link)
         soup = BeautifulSoup(html, "html.parser")
 
         title_element = soup.find("h1")

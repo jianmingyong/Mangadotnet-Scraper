@@ -1,9 +1,15 @@
 import logging
 from abc import ABC
 from asyncio import Lock, sleep
-from collections.abc import Callable, Coroutine, Iterable, Mapping
+from collections.abc import (
+    Callable,
+    Coroutine,
+    Iterable,
+    Mapping,
+    MutableMapping,
+)
 from functools import wraps
-from typing import Final
+from typing import Final, override
 
 from aiohttp import (
     AsyncResolver,
@@ -44,7 +50,8 @@ def create_client(
     headers.update(additional_headers)
 
     resolver = AsyncResolver(nameservers=["1.1.1.1"])
-    connector = TCPConnector(resolver=resolver, ttl_dns_cache=3600)
+    connector = TCPConnector(resolver=resolver, ttl_dns_cache=300)
+
     return ClientSession(
         base_url,
         connector=connector,
@@ -125,6 +132,7 @@ class RateLimitedMiddleware(Middleware):
         self._retry_wait_duration = retry_wait_duration
         self._lock = Lock()
 
+    @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
@@ -159,7 +167,7 @@ class CloudflareMiddleware(Middleware):
     _CLOUDFLARE_COOKIE_NAME = "cf_clearance"
 
     _user_agent: str | None
-    _cookies: Final[dict[str, str]]
+    _cookies: Final[MutableMapping[str, str]]
     _lock: Final[Lock]
 
     def __init__(self, user_agent: str | None = None) -> None:
@@ -167,6 +175,7 @@ class CloudflareMiddleware(Middleware):
         self._cookies = {}
         self._lock = Lock()
 
+    @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:

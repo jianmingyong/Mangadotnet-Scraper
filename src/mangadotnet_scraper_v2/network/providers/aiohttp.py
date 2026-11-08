@@ -2,19 +2,23 @@ import logging
 from abc import ABC
 from asyncio import Lock, sleep
 from collections.abc import Mapping
-from typing import Final
+from typing import Any, Final
 
 from aiohttp import (
     AsyncResolver,
     ClientHandlerType,
     ClientRequest,
     ClientResponse,
+    ClientResponseError,
     ClientSession,
     TCPConnector,
 )
 
 from mangadotnet_scraper_v2.camoufox_utils import get_cloudflare_cookies
-from mangadotnet_scraper_v2.network.base import BaseHttpClientProvider
+from mangadotnet_scraper_v2.network.base import (
+    BaseHttpClientProvider,
+    HttpResponseError,
+)
 
 
 class Middleware(ABC):
@@ -152,17 +156,80 @@ class AioHttpClientProvider(BaseHttpClientProvider):
     async def close(self) -> None:
         await self._client.close()
 
-    async def get_text(self, url: str, **kwargs) -> str:
-        async with self._client.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.text(encoding="utf-8")
+    async def get_text(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> str:
+        try:
+            async with self._client.get(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                response.raise_for_status()
+                return await response.text(encoding="utf-8")
+        except ClientResponseError as error:
+            raise HttpResponseError(error.status, error.message) from error
 
-    async def get_json(self, url: str, **kwargs) -> str:
-        async with self._client.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.json(encoding="utf-8")
+    async def get_json(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> str:
+        try:
+            async with self._client.get(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                response.raise_for_status()
+                return await response.json(
+                    encoding="utf-8",
+                    content_type=response.content_type,
+                )
+        except ClientResponseError as error:
+            raise HttpResponseError(error.status, error.message) from error
 
-    async def get_bytes(self, url: str, **kwargs) -> bytes:
-        async with self._client.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.read()
+    async def get_bytes(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> bytes:
+        try:
+            async with self._client.get(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                response.raise_for_status()
+                return await response.read()
+        except ClientResponseError as error:
+            raise HttpResponseError(error.status, error.message) from error

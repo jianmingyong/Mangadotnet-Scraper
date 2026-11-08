@@ -1,7 +1,6 @@
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
-from types import TracebackType
 from typing import Final, Literal, ReadOnly, TypedDict, cast
 
 from aiohttp import ClientResponse, ClientResponseError, ClientSession
@@ -42,12 +41,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
     def __init__(self) -> None:
         self._session = create_client(self._BASE_API_URL)
 
-    async def __aexit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_value: BaseException | None,
-        _traceback: TracebackType | None,
-    ) -> None:
+    async def __aexit__(self, *args) -> None:
         await self.close()
 
     async def close(self) -> None:

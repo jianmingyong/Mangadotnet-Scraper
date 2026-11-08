@@ -3,7 +3,7 @@ from collections.abc import AsyncIterable, Sequence
 from typing import Final, TypedDict, Unpack, override
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import (
+from mangadotnet_scraper.sources.base import (
     BaseModule,
     BaseModuleArgs,
     MangaChapter,

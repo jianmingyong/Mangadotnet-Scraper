@@ -5,12 +5,11 @@ from collections.abc import (
     MutableSequence,
 )
 from contextlib import AbstractContextManager
-from types import TracebackType
 from typing import ClassVar, Final, Self
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 from mangadotnet_scraper.data import MangaDotNetScraperData
-from mangadotnet_scraper.modules.base import BaseModule
+from mangadotnet_scraper.sources.base import BaseModule
 
 
 class ModuleManager(AbstractContextManager):
@@ -36,12 +35,7 @@ class ModuleManager(AbstractContextManager):
         self.prepare()
         return self
 
-    def __exit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_value: BaseException | None,
-        _traceback: TracebackType | None,
-    ) -> None:
+    def __exit__(self, *args) -> None:
         pass
 
     def prepare(self):
@@ -56,6 +50,6 @@ class ModuleManager(AbstractContextManager):
         return self._created_modules[id]
 
     def get_enabled_modules(self) -> Iterable[BaseModule]:
-        for id in self._config.enabled_modules:
+        for id in self._config.enabled_sources:
             if id in self._created_modules:
                 yield self._created_modules[id]

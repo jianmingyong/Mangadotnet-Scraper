@@ -1,132 +1,170 @@
 import json
-from collections.abc import Iterable, Mapping
-from typing import Any, Final, NotRequired, TypedDict
+import logging
+from collections.abc import (
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
+from typing import Any, Final
 
 
 class MangaDotNetScraperConfig:
-    class Data(TypedDict):
-        data_file: NotRequired[str]
-
-        mangadotnet_username: NotRequired[str]
-        mangadotnet_password: NotRequired[str]
-        mangadotnet_otp: NotRequired[str]
-        mangadotnet_user_session: NotRequired[str | None]
-
-        fetch_concurrency: NotRequired[int]
-
-        download_concurrency: NotRequired[int]
-        download_max_retry: NotRequired[int]
-
-        upload_concurrency: NotRequired[int]
-        upload_chunk_size: NotRequired[int]
-        upload_verify_duration: NotRequired[int]
-
-        enabled_modules: NotRequired[Iterable[str]]
-
-        modules: NotRequired[Mapping[str, Mapping[str, Any]]]
-
-    _CONFIG_FILE_PATH: Final[str] = "./config.json"
-
-    _DEFAULT_CONFIG: Final[Data] = {
-        "data_file": "data.db",
-        "mangadotnet_username": "",
-        "mangadotnet_password": "",
-        "mangadotnet_otp": "",
-        "mangadotnet_user_session": None,
-        "fetch_concurrency": 12,
-        "download_concurrency": 12,
-        "download_max_retry": 5,
-        "upload_concurrency": 10,
-        "upload_chunk_size": 4 * 1024 * 1024,
-        "upload_verify_duration": 60,
-        "enabled_modules": set(),
-        "modules": {},
-    }
-
-    def __init__(self) -> None:
-        self._data: self.Data = self._DEFAULT_CONFIG
-
-    def _return_or_default[T](self, value: T | None, default: T) -> T:
-        return value if value is not None else default
-
-    def get_module_config(self, module_id: str, key: str, default: Any) -> Any:
-        return (
-            self._return_or_default(self._data.get("modules"), {})
-            .get(module_id, {})
-            .get(key, default)
-        )
+    _config_file: Final[str]
+    _data: dict[str, Any]
 
     @property
     def data_file(self) -> str:
-        return self._return_or_default(self._data.get("data_file"), "data.db")
+        return self._get_config("data_file", str, "data.db")
 
     @property
     def mangadotnet_username(self) -> str | None:
-        return self._data.get("mangadotnet_username")
+        return self._get_config("mangadotnet_username", str)
 
     @property
     def mangadotnet_password(self) -> str | None:
-        return self._data.get("mangadotnet_password")
+        return self._get_config("mangadotnet_password", str)
 
     @property
     def mangadotnet_otp(self) -> str | None:
-        return self._data.get("mangadotnet_otp")
+        return self._get_config("mangadotnet_otp", str)
 
     @property
     def mangadotnet_user_session(self) -> str | None:
-        return self._data.get("mangadotnet_user_session")
+        return self._get_config("mangadotnet_user_session", str)
 
     @mangadotnet_user_session.setter
     def mangadotnet_user_session(self, value: str | None) -> None:
-        self._data["mangadotnet_user_session"] = value
+        self.set_config("mangadotnet_user_session", value)
 
     @property
     def fetch_concurrency(self) -> int:
-        return self._return_or_default(self._data.get("fetch_concurrency"), 12)
+        return self._get_config("fetch_concurrency", int, 12)
 
     @property
     def download_concurrency(self) -> int:
-        return self._return_or_default(
-            self._data.get("download_concurrency"), 12
-        )
+        return self._get_config("download_concurrency", int, 12)
 
     @property
     def download_max_retry(self) -> int:
-        return self._return_or_default(self._data.get("download_max_retry"), 5)
+        return self._get_config("download_max_retry", int, 5)
 
     @property
     def upload_concurrency(self) -> int:
-        return self._return_or_default(
-            self._data.get("upload_concurrency"), 10
-        )
+        return self._get_config("upload_concurrency", int, 10)
 
     @property
     def upload_chunk_size(self) -> int:
-        return self._return_or_default(
-            self._data.get("upload_chunk_size"), 4 * 1024 * 1024
-        )
+        return self._get_config("upload_chunk_size", int, 4 * 1024 * 1024)
 
     @property
     def upload_verify_duration(self) -> int:
-        return self._return_or_default(
-            self._data.get("upload_verify_duration"), 60
-        )
+        return self._get_config("upload_verify_duration", int, 60)
 
     @property
-    def enabled_modules(self) -> Iterable[str]:
-        return self._return_or_default(self._data.get("enabled_modules"), [])
+    def enabled_sources(self) -> Sequence[str]:
+        return self._get_config("enabled_sources", Sequence, [])
 
-    @enabled_modules.setter
-    def enabled_modules(self, value: Iterable[str]) -> None:
-        self._data["enabled_modules"] = value
+    @enabled_sources.setter
+    def enabled_sources(self, value: Sequence[str]) -> None:
+        self.set_config("enabled_sources", value)
 
-    def load_config(self) -> None:
+    def __init__(self, file: str | None = None):
+        self._config_file = file if file is not None else "config.json"
+
+    def load(self) -> None:
         try:
-            with open(self._CONFIG_FILE_PATH, "rt+") as f:
-                self._data = json.load(f)
-        except FileNotFoundError:
-            self._data = self._DEFAULT_CONFIG
+            with open(self._config_file, "rt") as file:
+                self._data = json.load(file)
+        except OSError:
+            logging.getLogger(__name__).exception(
+                "Config file cannot be read due to an error."
+            )
+            self._data = {}
 
-    def save_config(self) -> None:
-        with open(self._CONFIG_FILE_PATH, "wt+") as f:
-            json.dump(self._data, f, indent=4)
+    def save(self) -> None:
+        try:
+            with open(self._config_file, "wt") as file:
+                json.dump(self._data, file, indent=4)
+        except OSError:
+            logging.getLogger(__name__).exception(
+                "Config file cannot be written due to an error."
+            )
+
+    def get_source_config(self, source_id: str) -> Mapping[str, Any]:
+        return self._get_config(f"sources:{source_id}", Mapping[str, Any], {})
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        value = self._data
+
+        for k in key.split(":"):
+            if k.isnumeric():
+                if not isinstance(value, Sequence):
+                    return default
+
+                try:
+                    value = value[int(k)]
+                except IndexError:
+                    return default
+            else:
+                if not isinstance(value, Mapping):
+                    return default
+
+                value = value.get(k, default)
+
+        return value
+
+    def set_config(self, key: str, value: Any) -> None:
+        section = self._data
+
+        keys = key.split(":")
+        keys_length = len(keys)
+
+        for i in range(keys_length):
+            k = keys[i]
+
+            if k.isnumeric():
+                k = int(k)
+
+                if not isinstance(section, MutableSequence):
+                    raise KeyError("Invalid key")
+
+                if k >= len(section):
+                    raise IndexError("Invalid key")
+
+                if i == keys_length - 1:
+                    section[k] = value
+                else:
+                    if keys[i + 1].isnumeric() and not isinstance(
+                        section[k], MutableSequence
+                    ):
+                        section[k] = []
+                    elif not isinstance(section[k], MutableMapping):
+                        section[k] = {}
+
+                    section = section[k]
+            else:
+                if not isinstance(section, MutableMapping):
+                    raise KeyError("Invalid key")
+
+                if i == keys_length - 1:
+                    section[k] = value
+                else:
+                    if keys[i + 1].isnumeric() and not isinstance(
+                        section[k], MutableSequence
+                    ):
+                        section[k] = []
+                    elif not isinstance(section[k], MutableMapping):
+                        section[k] = {}
+
+                    section = section[k]
+
+    def _get_config[T](
+        self, key: str, expect_type: type[T], default: T = None
+    ) -> T:
+        value = self.get_config(key, default)
+
+        if isinstance(value, expect_type):
+            return value
+        else:
+            return default

@@ -13,16 +13,16 @@ from playwright.async_api import Browser, Page
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.modules.base import (
+from mangadotnet_scraper.sources.base import (
     BaseModule,
+    FetchError,
     MangaChapter,
     MangaDetail,
     MangaImage,
     MangaListing,
     MangaPage,
 )
-from mangadotnet_scraper.modules.error import FetchError, SeriesNotFoundError
-from mangadotnet_scraper.modules.manager import ModuleManager
+from mangadotnet_scraper.sources.manager import ModuleManager
 from mangadotnet_scraper.utilities import (
     clean_string,
     dict_get_recursive,

@@ -19,7 +19,7 @@ class JsonConfigProvider(ConfigProvider):
             with open(self._config_file, "rt") as file:
                 self._data = json.load(file)
         except OSError:
-            logging.getLogger(__name__).warning(
+            logging.getLogger(__name__).exception(
                 "Config file not found or not readable. Using default config."
             )
             self._data = {}

@@ -2,11 +2,11 @@ from collections.abc import Collection, Iterable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from itertools import groupby
-from sqlite3 import Connection, Cursor
-from sqlite3 import connect as sqlite3_connect
 from string.templatelib import Interpolation, Template, convert
-from types import TracebackType
 from typing import Final, Literal
+
+from cysqlite import Connection, Cursor
+from cysqlite import connect as cysqlite_connect
 
 from mangadotnet_scraper.config import MangaDotNetScraperConfig
 
@@ -34,27 +34,20 @@ class ModuleChapter:
 
 
 class MangaDotNetScraperData(AbstractContextManager):
-    _config: Final[MangaDotNetScraperConfig]
     _connection: Final[Connection]
 
     def __init__(self, config: MangaDotNetScraperConfig) -> None:
-        self._config = config
-        self._connection = sqlite3_connect(config.data_file, autocommit=False)
-        self._connection.execute("PRAGMA foreign_keys = 1;")
+        self._connection = cysqlite_connect(
+            config.data_file, pragmas={"foreign_keys": 1}
+        )
         self.initialize()
 
-    def __exit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_value: BaseException | None,
-        _traceback: TracebackType | None,
-        /,
-    ) -> None:
+    def __exit__(self, *args) -> None:
         self.close()
 
     def initialize(self) -> None:
-        with self._connection as connection:
-            connection.executescript(
+        with self._connection.atomic():
+            self._connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS db_version
                 (
@@ -62,12 +55,29 @@ class MangaDotNetScraperData(AbstractContextManager):
                     version     INTEGER NOT NULL DEFAULT 1
                 );
 
-                CREATE TABLE IF NOT EXISTS module
+                CREATE TABLE IF NOT EXISTS source
                 (
-                    module_id       TEXT    NOT NULL,
-                    version         INTEGER NOT NULL DEFAULT 1,
-                    CONSTRAINT module_unique_module_id UNIQUE (module_id)
+                    source_id   TEXT    NOT NULL PRIMARY KEY,
+                    version     INTEGER NOT NULL DEFAULT 1
                 );
+
+                CREATE TABLE IF NOT EXISTS source_entry
+                (
+                    rowid                   INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    source_id               TEXT    NOT NULL,
+                    manga_id                TEXT    NOT NULL,
+                    link                    TEXT    NOT NULL,
+                    title                   TEXT    NOT NULL,
+                    alt_titles              TEXT    DEFAULT NULL,
+                    mangabaka_id            INTEGER DEFAULT NULL,
+                    mangadotnet_id          INTEGER DEFAULT NULL,
+                    manual_mapping_override INTEGER NOT NULL DEFAULT 0,
+                    skip_upload             INTEGER NOT NULL DEFAULT 0,
+                    chapters                TEXT    DEFAULT NULL,
+                    CONSTRAINT source_entry_unique_manga_id UNIQUE (source_id, manga_id)
+                );
+
+                DROP TABLE IF EXISTS module;
 
                 CREATE TABLE IF NOT EXISTS module_manga
                 (
@@ -123,16 +133,17 @@ class MangaDotNetScraperData(AbstractContextManager):
                 """
             )
 
-            cursor = connection.execute(
+            cursor = self._connection.execute(
                 "SELECT table_name, version FROM db_version;"
             )
+
             table_version: dict[str, int] = {}
 
             for table_name, version in cursor:
                 table_version[table_name] = version
 
             if table_version.get("module_manga", 1) < 7:
-                connection.executescript(
+                self._connection.executescript(
                     """
                     ALTER TABLE module_manga ADD COLUMN skip_upload INTEGER NOT NULL DEFAULT 0;
                     ALTER TABLE module_manga DROP COLUMN half_chapters;
@@ -142,8 +153,13 @@ class MangaDotNetScraperData(AbstractContextManager):
                 )
 
     def close(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
+        if self._connection is None:
+            return
+
+        if self._connection.in_transaction:
+            self._connection.commit()
+
+        self._connection.close(True)
 
     def _execute(self, sql: Template) -> Cursor:
         query = ""
@@ -175,7 +191,7 @@ class MangaDotNetScraperData(AbstractContextManager):
     def add_module_listing(
         self, module_id: str, manga_id: str, title: str, link: str
     ) -> None:
-        with self._connection:
+        with self._connection.atomic():
             self._execute(
                 t"""
                 INSERT INTO module_manga (module_id, manga_id, title, link)
@@ -218,7 +234,7 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-        return count.fetchone()[0], cursor
+        return count.scalar(), cursor
 
     def get_module_listing_non_mapped(
         self, module_id: str
@@ -240,12 +256,12 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-        return count.fetchone()[0], cursor
+        return count.scalar(), cursor
 
     def update_manual_mapping(
         self, rowid: int, mangabaka_id: int | None, mangadotnet_id: int | None
     ) -> None:
-        with self._connection:
+        with self._connection.atomic():
             self._execute(
                 t"""
                 UPDATE module_manga
@@ -261,7 +277,7 @@ class MangaDotNetScraperData(AbstractContextManager):
     def update_module_manga_upload_status(
         self, rowid: int, skip_upload: int | bool
     ) -> None:
-        with self._connection:
+        with self._connection.atomic():
             self._execute(
                 t"""
                 UPDATE module_manga
@@ -280,7 +296,7 @@ class MangaDotNetScraperData(AbstractContextManager):
         """)
 
     def add_module_manga(self, rowid: int, manga: ModuleManga) -> None:
-        with self._connection:
+        with self._connection.atomic():
             self._execute(
                 t"""
                 UPDATE module_manga
@@ -416,7 +432,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                             )
 
     def remove_module_manga(self, rowid: int) -> None:
-        with self._connection:
+        with self._connection.atomic():
             self._execute(t"DELETE FROM module_manga WHERE rowid = {rowid};")
 
     def get_non_uploaded_manga(self, module_id: str) -> tuple[int, Cursor]:
@@ -432,7 +448,7 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-        return count.fetchone()[0], self._execute(
+        return count.scalar(), self._execute(
             t"""
             SELECT rowid, manga_id, link, title, mangadotnet_id
             FROM module_manga
@@ -456,7 +472,7 @@ class MangaDotNetScraperData(AbstractContextManager):
             """
         )
 
-        return count.fetchone()[0], self._execute(
+        return count.scalar(), self._execute(
             t"""
             SELECT manga_rowid, language, scanlator_group, type, chapter_number, volume_number, title, link, chapter_id
             FROM module_chapter
@@ -474,7 +490,7 @@ class MangaDotNetScraperData(AbstractContextManager):
         chapter_number: float | None,
         volume_number: float | None,
     ) -> None:
-        with self._connection:
+        with self._connection.atomic():
             if type == "chapter":
                 self._execute(
                     t"""
