@@ -1,17 +1,23 @@
-import re
-from collections.abc import AsyncIterable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Final, TypedDict, Unpack, override
 
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
+from asynciolimiter import Limiter
+
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.network import HttpClient
+from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
-    BaseModule,
-    BaseModuleArgs,
-    MangaChapter,
-    MangaDetail,
-    MangaListing,
-    MangaPage,
+    Chapter,
+    ImageRequest,
+    Manga,
+    Page,
+    SourceInfo,
 )
-from mangadotnet_scraper.utilities import clean_string, dict_get_recursive
+from mangadotnet_scraper.utilities import (
+    clean_alt_titles,
+    clean_chapter_title,
+    dict_get_recursive,
+)
 
 
 class MangaListingResponse(TypedDict):
@@ -61,32 +67,77 @@ class MangaPageResponseImage(TypedDict):
     height: int
 
 
-class EzManhwaTemplate(BaseModule):
+class EzManhwaTemplate(BaseSourceProvider):
     group_name: Final[str]
+    base_api_url: Final[str | None]
+    user_agent: Final[str | None]
+
+    limiter: Limiter
 
     def __init__(
         self,
-        config: MangaDotNetScraperConfig,
+        config: Config,
         group_name: str,
-        **kwargs: Unpack[BaseModuleArgs],
+        base_api_url: str | None = None,
+        user_agent: str | None = None,
+        **kwargs: Unpack[SourceInfo],
     ) -> None:
         super().__init__(config, **kwargs)
 
         self.group_name = group_name
+        self.base_api_url = base_api_url
+        self.user_agent = user_agent
+
+    async def fetch_listing(self, page: int = 1) -> MangaListingResponse:
+        return await self.client.get_json(
+            "/api/v1/series",
+            params={"page": page, "perPage": 100, "sort": "newest"},
+        )
 
     @override
-    async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        async def fetch_listing(page: int = 1) -> MangaListingResponse:
-            return await self.get_json(
-                "/api/v1/series",
-                params={"page": page, "perPage": 100, "sort": "newest"},
+    async def initialize(self) -> None:
+        await super().initialize()
+
+        self.limiter = Limiter(1, max_burst=60)
+
+        if self.base_api_url is not None:
+            if self.client is not None:
+                await self.client.close()
+
+            self.client = HttpClient(
+                self.base_api_url,
+                self.user_agent,
+                headers={
+                    "Origin": self.base_url,
+                    "Referer": f"{self.base_url}/",
+                },
+                limiter=self.limiter,
             )
 
+    @override
+    async def close(self) -> None:
+        await super().close()
+
+        if self.limiter is not None:
+            self.limiter.close()
+
+    async def get_chapters(
+        self, slug_id: str, cursor: str | None
+    ) -> MangaChapterResponse:
+        return await self.client.get_json(
+            f"/api/v2/series/{slug_id}/chapters",
+            params={"limit": 100, "sort": "asc"}
+            if cursor is None
+            else {"limit": 100, "sort": "asc", "cursor": cursor},
+        )
+
+    @override
+    async def _on_get_manga_list(self) -> AsyncGenerator[Manga]:
         page = 1
         has_next_page = True
 
         while has_next_page:
-            json = await fetch_listing(page)
+            json = await self.fetch_listing(page)
 
             for data in dict_get_recursive(json, "data", default=[]):
                 if (
@@ -100,10 +151,10 @@ class EzManhwaTemplate(BaseModule):
                     if id is None or title is None or slug is None:
                         continue
 
-                    yield MangaListing(
-                        str(id),
-                        clean_string(title),
-                        clean_string(f"{self.base_url}/series/{slug}"),
+                    yield Manga(
+                        id=str(id),
+                        title=title,
+                        link=f"{self.base_url}/series/{slug}",
                     )
 
             has_next_page = page * 100 < dict_get_recursive(
@@ -112,103 +163,89 @@ class EzManhwaTemplate(BaseModule):
             page += 1
 
     @override
-    async def on_fetch_manga_detail(
-        self, manga_id: str, link: str
-    ) -> MangaDetail:
-        slug_id = link[link.rindex("/") + 1 :]
+    async def _on_get_manga_update(
+        self,
+        manga: Manga,
+        need_details: bool = True,
+        need_chapters: bool = True,
+    ) -> Manga:
+        new_manga = manga.copy()
+        slug_id = manga.link[manga.link.rindex("/") + 1 :]
 
-        detail_json: MangaDetailResponse = await self.get_json(
-            f"/api/v1/series/{slug_id}"
-        )
-
-        title = clean_string(
-            dict_get_recursive(detail_json, "title", default="")
-        )
-
-        alt_titles_str: str | None = dict_get_recursive(
-            detail_json, "alternativeTitles"
-        )
-
-        if alt_titles_str is None:
-            alt_titles = []
-        else:
-            alt_titles = [
-                clean_string(x)
-                for x in re.split(
-                    r"[/\\\r\n]+",
-                    alt_titles_str,
-                )
-                if len(clean_string(x)) > 0
-            ]
-
-        chapters = []
-
-        async def get_chapters(
-            cursor: str | None,
-        ) -> MangaChapterResponse:
-            return await self.get_json(
-                f"/api/v2/series/{slug_id}/chapters",
-                params={"limit": 100, "sort": "asc"}
-                if cursor is None
-                else {"limit": 100, "sort": "asc", "cursor": cursor},
+        if need_details:
+            detail_json: MangaDetailResponse = await self.client.get_json(
+                f"/api/v1/series/{slug_id}"
             )
 
-        has_more = True
-        cursor = None
+            new_manga.title = dict_get_recursive(
+                detail_json, "title", default=new_manga.title
+            )
 
-        while has_more:
-            chapters_json = await get_chapters(cursor)
+            alt_titles_str: str | None = dict_get_recursive(
+                detail_json, "alternativeTitles"
+            )
 
-            for data in dict_get_recursive(chapters_json, "data", default=[]):
-                if dict_get_recursive(data, "isFree", default=True):
-                    inner_title: str | None = dict_get_recursive(data, "title")
-                    inner_number: float | None = dict_get_recursive(
-                        data, "number"
-                    )
-                    slug: str | None = dict_get_recursive(data, "slug")
-                    id: int | None = dict_get_recursive(data, "id")
+            new_manga.alt_titles = clean_alt_titles(alt_titles_str)
 
-                    if inner_number is None or slug is None or id is None:
-                        continue
+        if need_chapters:
+            chapters = []
 
-                    chapters.append(
-                        MangaChapter(
-                            self.language,
-                            self.group_name,
-                            "chapter",
-                            inner_number,
-                            None,
-                            inner_title
-                            if inner_title is not None
-                            and inner_title != ""
-                            and inner_title != inner_number
-                            else f"Chapter {inner_number}",
-                            f"{self.base_url}/series/{slug_id}/{slug}",
-                            str(id),
+            has_more = True
+            cursor = None
+
+            while has_more:
+                chapters_json = await self.get_chapters(slug_id, cursor)
+
+                for data in dict_get_recursive(
+                    chapters_json, "data", default=[]
+                ):
+                    if dict_get_recursive(data, "isFree", default=True):
+                        inner_title: str | None = dict_get_recursive(
+                            data, "title"
                         )
-                    )
+                        inner_number: float | None = dict_get_recursive(
+                            data, "number"
+                        )
+                        slug: str | None = dict_get_recursive(data, "slug")
+                        id: int | None = dict_get_recursive(data, "id")
 
-            has_more = dict_get_recursive(
-                chapters_json, "hasMore", default=False
-            )
-            cursor = dict_get_recursive(chapters_json, "nextCursor")
+                        if inner_number is None or slug is None or id is None:
+                            continue
 
-        return MangaDetail(title, alt_titles, chapters)
+                        chapters.append(
+                            Chapter(
+                                id=str(id),
+                                language="en",
+                                group=self.group_name,
+                                type="chapter",
+                                volume_number=None,
+                                chapter_number=inner_number,
+                                title=clean_chapter_title(
+                                    inner_number, inner_title
+                                ),
+                                link=f"{self.base_url}/series/{slug_id}/{slug}",
+                            )
+                        )
+
+                has_more = dict_get_recursive(
+                    chapters_json, "hasMore", default=False
+                )
+                cursor = dict_get_recursive(chapters_json, "nextCursor")
+
+            new_manga.chapters = chapters
+
+        return new_manga
 
     @override
-    async def on_fetch_manga_pages(
-        self,
-        manga_id: str,
-        manga_link: str,
-        chapter_id: str,
-        chapter_link: str,
-    ) -> list[MangaPage]:
-        manga_slug = manga_link[manga_link.rfind("/") + 1 :]
-        chapter_slug = chapter_link[chapter_link.rfind("/") + 1 :]
+    async def _on_get_page_list(
+        self, manga: Manga, chapter: Chapter
+    ) -> Sequence[Page]:
+        manga_slug = manga.link[manga.link.rfind("/") + 1 :]
+        chapter_slug = chapter.link[chapter.link.rfind("/") + 1 :]
 
-        manga_pages: list[MangaPage] = []
+        manga_pages = []
 
-        json: MangaPageResponse = await self.get_json(
+        json: MangaPageResponse = await self.client.get_json(
             f"/api/v1/series/{manga_slug}/chapters/{chapter_slug}"
         )
 
@@ -219,6 +256,10 @@ class EzManhwaTemplate(BaseModule):
             if order is None or url is None:
                 continue
 
-            manga_pages.append(MangaPage(order, url, None))
+            manga_pages.append(Page(order, url))
 
         return manga_pages
+
+    @override
+    async def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(headers={"Referer": f"{self.base_url}/"})

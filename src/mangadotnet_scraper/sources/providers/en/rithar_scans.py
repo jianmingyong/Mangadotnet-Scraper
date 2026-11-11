@@ -1,22 +1,20 @@
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
-from mangadotnet_scraper.sources.templates.keyoapp import (
-    KeyoAppLivewireTemplate,
-)
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
+from mangadotnet_scraper.sources.templates import KeyoAppLivewireTemplate
 
 
-class RitharScansModule(KeyoAppLivewireTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+class RitharScansSourceProvider(KeyoAppLivewireTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="Rithar Scans",
-            module_id="rithar_scans",
-            display_name="Rithar Scans",
-            language="en",
-            version=1,
-            base_url="https://ritharscans.com",
             base_cdn_url="https://cdn.ritharscans.com",
+            source_id="en.rithar_scans",
+            name="Rithar Scans",
+            version=1,
+            languages=["en"],
+            base_url="https://ritharscans.com",
         )
 
 
-ModuleManager.register_module(RitharScansModule)
+SourceProvider.register_source(RitharScansSourceProvider)

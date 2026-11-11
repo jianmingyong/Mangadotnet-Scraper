@@ -1,20 +1,20 @@
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
-class HiveScansModule(IkenTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig):
+class HiveScansSourceProvider(IkenTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="HiveToons",
-            module_id="hive_scans",
-            display_name="Hive Toons",
-            language="en",
-            version=1,
-            base_url="https://hivetoons.org",
             base_api_url="https://api.hivetoons.org",
+            source_id="en.hive_scans",
+            name="Hive Toons",
+            version=1,
+            languages=["en"],
+            base_url="https://hivetoons.org",
         )
 
 
-ModuleManager.register_module(HiveScansModule)
+SourceProvider.register_source(HiveScansSourceProvider)

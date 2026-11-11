@@ -1,8 +1,7 @@
 from abc import abstractmethod
-from collections.abc import AsyncIterable, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
-from io import BytesIO
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Final,
@@ -11,263 +10,295 @@ from typing import (
     Required,
     Self,
     TypedDict,
-    Unpack,
+    cast,
+    override,
 )
 
-import pillow_jxl  # noqa: F401
-from aiohttp import ClientMiddlewareType, ClientSession
-from aiohttp.client import _RequestOptions
-from aiohttp.typedefs import StrOrURL
-from PIL import Image
+from camoufox import AsyncCamoufox
+from playwright.async_api import Browser, BrowserContext, Error
 
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.network import create_client, retryable_client_session
+from mangadotnet_scraper.camoufox_utils import create_browser
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.network import HttpClient
+from mangadotnet_scraper.utilities import clean_string, normalize_url
 
 
-@dataclass(frozen=True)
-class MangaListing:
-    manga_id: str
+@dataclass
+class Manga:
+    id: str
     title: str
     link: str
+    alt_titles: Sequence[str] = field(default_factory=list)
+    chapters: Sequence[Chapter] = field(default_factory=list)
+
+    def copy(self) -> Manga:
+        return Manga(
+            self.id,
+            self.title,
+            self.link,
+            [t for t in self.alt_titles],
+            [c.copy() for c in self.chapters],
+        )
 
 
-@dataclass(frozen=True)
-class MangaDetail:
-    title: str
-    alt_titles: Sequence[str]
-    chapters: Sequence[MangaChapter]
-
-
-@dataclass(frozen=True)
-class MangaChapter:
+@dataclass
+class Chapter:
+    id: str
     language: str
     group: str
     type: Literal["chapter", "volume"]
-    chapter_number: float | None
     volume_number: float | None
+    chapter_number: float | None
     title: str
     link: str
-    chapter_id: str
+
+    def copy(self) -> Chapter:
+        return Chapter(
+            self.id,
+            self.language,
+            self.group,
+            self.type,
+            self.volume_number,
+            self.chapter_number,
+            self.title,
+            self.link,
+        )
 
 
 @dataclass(frozen=True)
-class MangaPage:
+class Page:
     page_number: int
     image_link: str
     context_data: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
-class MangaImage:
+class ImageRequest:
+    cookies: Mapping[str, str] | None = None
+    headers: Mapping[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Image:
     filename: str
     data: bytes
 
 
-class FetchError(Exception):
-    """Base class for any fetch related error"""
+class SourceError(Exception):
+    """Base class for source errors"""
 
 
-class BaseModuleArgs(TypedDict):
-    module_id: Required[str]
-    display_name: Required[str]
-    language: NotRequired[str]
-    version: NotRequired[int]
+class SourceInfo(TypedDict):
+    source_id: Required[str]
+    name: Required[str]
+    version: Required[int]
+    languages: Required[Sequence[str]]
 
-    base_url: Required[str]
-    base_api_url: NotRequired[str]
-
-    user_agent: NotRequired[str]
-    additional_headers: NotRequired[Mapping[str, str]]
-    additional_middlewares: NotRequired[Iterable[ClientMiddlewareType]]
+    base_url: NotRequired[str | None]
+    base_urls: NotRequired[Sequence[str] | None]
 
 
-class BaseModule(AbstractAsyncContextManager):
-    config: Final[MangaDotNetScraperConfig]
+class BaseSourceProvider(AbstractAsyncContextManager):
+    config: Final[Config]
 
-    module_id: Final[str]
-    display_name: Final[str]
-    language: Final[str]
+    source_id: Final[str]
+    name: Final[str]
     version: Final[int]
+    languages: Final[Sequence[str]]
 
-    base_url: Final[str]
-    base_api_url: Final[str]
+    base_url: str
+    base_urls: Final[Sequence[str]]
 
-    user_agent: Final[str | None]
-    additional_headers: Final[Mapping[str, str]]
-    additional_middlewares: Final[Iterable[ClientMiddlewareType]]
+    settings: Mapping[str, Any]
 
-    fetch_concurrency: int
-    download_concurrency: int
-    upload_concurrency: int
+    client: HttpClient
 
-    session: ClientSession
+    _camoufox: AsyncCamoufox | None
+    _browser: Browser | None
+    _browser_context: BrowserContext | None
 
     def __init__(
         self,
-        config: MangaDotNetScraperConfig,
-        **kwargs: Unpack[BaseModuleArgs],
+        config: Config,
+        source_id: str,
+        name: str,
+        languages: Sequence[str],
+        version: int,
+        base_url: str | None = None,
+        base_urls: Sequence[str] | None = None,
     ) -> None:
         self.config = config
 
-        self.module_id = kwargs["module_id"]
-        self.display_name = kwargs["display_name"]
-        self.language = kwargs.get("language", "en")
-        self.version = kwargs.get("version", 1)
+        self.source_id = source_id
+        self.name = name
+        self.version = version
+        self.languages = languages
 
-        self.base_url = kwargs["base_url"]
-        self.base_api_url = kwargs.get("base_api_url", self.base_url)
+        if base_url is None and base_urls is None:
+            raise SourceError(
+                "Source cannot be initilized as base_url or base_urls must be defined"
+            )
 
-        self.user_agent = kwargs.get("user_agent", None)
-        self.additional_headers = kwargs.get("additional_headers", {})
-        self.additional_middlewares = kwargs.get("additional_middlewares", [])
+        self.base_urls = (
+            base_urls if base_urls is not None else [cast(str, base_url)]
+        )
 
-        self.fetch_concurrency = config.fetch_concurrency
-        self.download_concurrency = config.download_concurrency
-        self.upload_concurrency = config.upload_concurrency
-
+    @override
     async def __aenter__(self) -> Self:
         await self.initialize()
         return self
 
+    @override
     async def __aexit__(self, *args) -> None:
         await self.close()
 
     @classmethod
-    def create_module(cls, config: MangaDotNetScraperConfig) -> Self:
-        if cls is BaseModule:
-            raise ValueError(
-                "Cannot initialize base module. Please use the constructor instead."
-            )
+    def create_provider(cls, config: Config) -> Self:
+        if cls is BaseSourceProvider:
+            raise ValueError("Cannot initialize base module.")
 
         # pyrefly: ignore [missing-argument]
         return cls(config)
 
     async def initialize(self) -> None:
-        self.session = create_client(
-            base_url=self.base_api_url,
-            user_agent=self.user_agent,
-            additional_headers=self.additional_headers,
-            additional_middlewares=self.additional_middlewares,
-        )
+        self.settings = self.config.get_source_config(self.source_id)
+        self.base_url = self.settings.get("base_url", self.base_urls[0])
+
+        self.client = HttpClient(self.base_url)
+
+        self._camoufox = None
+        self._browser = None
+        self._browser_context = None
 
     async def close(self) -> None:
-        if self.session is not None:
-            await self.session.close()
+        if self.client is not None:
+            await self.client.close()
 
-    @retryable_client_session
-    async def get_html(
-        self,
-        url: StrOrURL,
-        **kwargs: Unpack[_RequestOptions],
-    ) -> str:
-        async with self.session.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.text("utf-8")
+        if self._browser_context is not None:
+            await self._browser_context.close()
 
-    @retryable_client_session
-    async def get_json(
-        self,
-        url: StrOrURL,
-        **kwargs: Unpack[_RequestOptions],
-    ) -> Any:
-        async with self.session.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.json(encoding="utf-8")
+        if self._browser is not None:
+            await self._browser.close()
 
-    @retryable_client_session
-    async def post_json(
-        self,
-        url: StrOrURL,
-        **kwargs: Unpack[_RequestOptions],
-    ) -> Any:
-        async with self.session.post(url, **kwargs) as response:
-            response.raise_for_status()
-            return await response.json(encoding="utf-8")
+        if self._camoufox is not None:
+            await self._camoufox.__aexit__()
 
-    @retryable_client_session
-    async def download_image(
-        self,
-        url: StrOrURL,
-        **kwargs: Unpack[_RequestOptions],
-    ) -> tuple[str, bytes]:
-        async with self.session.get(url, **kwargs) as response:
-            response.raise_for_status()
-            return (response.content_type, await response.read())
-
-    def fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        try:
-            return self.on_fetch_manga_listing()
-        except FetchError:
-            raise
-        except Exception as error:
-            raise FetchError() from error
-
-    @abstractmethod
-    def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        raise NotImplementedError()
-
-    async def fetch_manga_detail(
-        self, manga_id: str, link: str
-    ) -> MangaDetail:
-        try:
-            return await self.on_fetch_manga_detail(manga_id, link)
-        except FetchError:
-            raise
-        except Exception as error:
-            raise FetchError() from error
-
-    @abstractmethod
-    async def on_fetch_manga_detail(
-        self, manga_id: str, link: str
-    ) -> MangaDetail:
-        raise NotImplementedError()
-
-    async def fetch_manga_pages(
-        self,
-        manga_id: str,
-        manga_link: str,
-        chapter_id: str,
-        chapter_link: str,
-    ) -> Sequence[MangaPage]:
-        try:
-            result = await self.on_fetch_manga_pages(
-                manga_id, manga_link, chapter_id, chapter_link
+    async def get_browser_context(self) -> BrowserContext:
+        if self._browser_context is None:
+            self._camoufox = (
+                create_browser() if self._camoufox is None else self._camoufox
             )
 
-            seen = set()
-
-            if any(i in seen or seen.add(i.page_number) for i in result):
-                raise FetchError(
-                    "There are duplicate page number which can result in artifact problems."
+            try:
+                self._browser = (
+                    cast(Browser, await self._camoufox.start())
+                    if self._browser is None
+                    else self._browser
                 )
+                self._browser_context = await self._browser.new_context()
+            except Error:
+                await self._camoufox.__aexit__()
+                raise
+
+        return self._browser_context
+
+    async def get_manga_list(self) -> AsyncGenerator[Manga]:
+        try:
+            async for list in self._on_get_manga_list():
+                list.id = clean_string(list.id)
+                list.title = clean_string(list.title)
+                list.link = normalize_url(
+                    clean_string(list.link), self.base_url
+                )
+                yield list
+        except Exception as error:
+            raise SourceError("Error fetching manga list") from error
+
+    async def get_manga_update(
+        self,
+        manga: Manga,
+        need_details: bool = True,
+        need_chapters: bool = True,
+    ) -> Manga:
+        try:
+            result = await self._on_get_manga_update(
+                manga, need_details, need_chapters
+            )
+
+            result.id = clean_string(result.id)
+            result.title = clean_string(result.title)
+            result.alt_titles = [clean_string(x) for x in result.alt_titles]
+            result.link = normalize_url(result.link, self.base_url)
+
+            for chapter in result.chapters:
+                chapter.id = clean_string(chapter.id)
+                chapter.language = clean_string(chapter.language)
+                chapter.group = clean_string(chapter.group)
+                chapter.title = clean_string(chapter.title)
+                chapter.link = normalize_url(chapter.link, self.base_url)
 
             return result
-        except FetchError:
-            raise
         except Exception as error:
-            raise FetchError() from error
+            raise SourceError("Error fetching manga update") from error
+
+    async def get_page_list(
+        self, manga: Manga, chapter: Chapter
+    ) -> Sequence[Page]:
+        try:
+            pages = await self._on_get_page_list(manga, chapter)
+            seen: set[int] = set()
+
+            for page in pages:
+                if page.page_number in seen:
+                    raise SourceError(
+                        "Duplicate page number found. This might be a broken chapter."
+                    )
+                else:
+                    seen.add(page.page_number)
+
+            return pages
+        except Exception as error:
+            raise SourceError("Error fetching page list") from error
+
+    async def get_image_request(self, page: Page) -> ImageRequest:
+        try:
+            return await self._on_get_image_request(page)
+        except Exception as error:
+            raise SourceError("Error fetching image request") from error
+
+    async def process_page_image(self, image: bytes, page: Page) -> bytes:
+        try:
+            return await self._on_process_page_image(image, page)
+        except Exception as error:
+            raise SourceError("Error processing page image") from error
+
+    async def handle_manga_migration(self, manga: Manga) -> Manga:
+        try:
+            return await self._on_handle_manga_migration(manga)
+        except Exception as error:
+            raise SourceError("Error handling manga migration") from error
 
     @abstractmethod
-    async def on_fetch_manga_pages(
+    def _on_get_manga_list(self) -> AsyncGenerator[Manga]: ...
+
+    @abstractmethod
+    async def _on_get_manga_update(
         self,
-        manga_id: str,
-        manga_link: str,
-        chapter_id: str,
-        chapter_link: str,
-    ) -> Sequence[MangaPage]:
-        raise NotImplementedError()
+        manga: Manga,
+        need_details: bool = True,
+        need_chapters: bool = True,
+    ) -> Manga: ...
 
-    async def fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        try:
-            return await self.on_fetch_manga_image(page)
-        except FetchError:
-            raise
-        except Exception as error:
-            raise FetchError() from error
+    @abstractmethod
+    async def _on_get_page_list(
+        self, manga: Manga, chapter: Chapter
+    ) -> Sequence[Page]: ...
 
-    async def on_fetch_manga_image(self, page: MangaPage) -> MangaImage:
-        _, data = await self.download_image(page.image_link)
+    async def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest()
 
-        with Image.open(BytesIO(data)) as image:
-            filename = f"{page.page_number:03d}.{image.format}"
-            return MangaImage(filename, data)
+    async def _on_process_page_image(self, image: bytes, page: Page) -> bytes:
+        return image
+
+    async def _on_handle_manga_migration(self, manga: Manga) -> Manga:
+        return manga

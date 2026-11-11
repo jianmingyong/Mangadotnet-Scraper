@@ -1,49 +1,67 @@
-import json
 import re
-from collections.abc import AsyncIterable, Sequence
-from typing import Final, Unpack, cast, override
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from typing import Any, Final, Unpack, cast, override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.network import retryable_client_session
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.network import HttpResponseError
 from mangadotnet_scraper.sources.base import (
-    BaseModule,
-    BaseModuleArgs,
-    MangaChapter,
-    MangaDetail,
-    MangaListing,
-    MangaPage,
+    BaseSourceProvider,
+    Chapter,
+    ImageRequest,
+    Manga,
+    Page,
+    SourceInfo,
 )
-from mangadotnet_scraper.utilities import clean_string, normalize_url
+from mangadotnet_scraper.utilities import clean_chapter_title, normalize_url
 
 
-class KeyoAppLivewireTemplate(BaseModule):
+class KeyoAppLivewireTemplate(BaseSourceProvider):
     group_name: Final[str]
     base_cdn_url: Final[str]
 
     def __init__(
         self,
-        config: MangaDotNetScraperConfig,
+        config: Config,
         group_name: str,
         base_cdn_url: str,
-        **kwargs: Unpack[BaseModuleArgs],
+        **kwargs: Unpack[SourceInfo],
     ) -> None:
         super().__init__(config, **kwargs)
 
         self.group_name = group_name
         self.base_cdn_url = base_cdn_url
 
-    @override
-    async def on_fetch_manga_listing(self) -> AsyncIterable[MangaListing]:
-        async def fetch_listing_html(page: int = 1) -> str:
-            return await self.get_html("/latest", params={"page": page})
+    async def fetch_listing_html(self, page: int = 1) -> str:
+        return await self.client.get_text("/latest", params={"page": page})
 
+    def is_chapter_link_element(self, tag: Tag) -> bool:
+        return (
+            tag.name == "a"
+            and tag.has_attr("href")
+            and re.search("/read/", cast(str, tag.get("href", default="")))
+            is not None
+            and tag.find_parent("div", attrs={"id": "chapters"}) is not None
+        )
+
+    async def test_page_response(self, link: str) -> bool:
+        try:
+            await self.client.head(link)
+            return True
+        except HttpResponseError as error:
+            if error.status == 404:
+                return False
+            else:
+                raise
+
+    @override
+    async def _on_get_manga_list(self) -> AsyncGenerator[Manga]:
         page = 1
         has_next_page = True
 
         while has_next_page:
-            html = await fetch_listing_html(page)
+            html = await self.fetch_listing_html(page)
             soup = BeautifulSoup(html, "html.parser")
 
             elements = soup.find_all(
@@ -51,8 +69,8 @@ class KeyoAppLivewireTemplate(BaseModule):
             )
 
             for element in elements:
-                link = cast(str, element.attrs.get("href"))
-                title = cast(str, element.attrs.get("title"))
+                link = cast(str | None, element.get("href"))
+                title = cast(str | None, element.get("title"))
 
                 if title is None or link is None:
                     continue
@@ -63,11 +81,7 @@ class KeyoAppLivewireTemplate(BaseModule):
                 else:
                     series_id = link[link.rfind("/") + 1 :]
 
-                yield MangaListing(
-                    clean_string(series_id),
-                    clean_string(title),
-                    normalize_url(clean_string(link), self.base_url),
-                )
+                yield Manga(id=series_id, title=title, link=link)
 
             page += 1
             has_next_page = (
@@ -76,156 +90,162 @@ class KeyoAppLivewireTemplate(BaseModule):
             )
 
     @override
-    async def on_fetch_manga_detail(
-        self, manga_id: str, link: str
-    ) -> MangaDetail:
-        html = await self.get_html(link)
+    async def _on_get_manga_update(
+        self,
+        manga: Manga,
+        need_details: bool = True,
+        need_chapters: bool = True,
+    ) -> Manga:
+        new_manga = manga.copy()
+
+        html = await self.client.get_text(manga.link)
         soup = BeautifulSoup(html, "html.parser")
 
-        title_element = soup.find("h1")
-        title = clean_string(title_element.text) if title_element else ""
-
-        alt_titles_element = soup.find_all("li", attrs={"class": "select-all"})
-        alt_titles = [clean_string(e.text) for e in alt_titles_element]
-
-        def is_chapter_link_element(tag: Tag) -> bool:
-            return (
-                tag.name == "a"
-                and tag.has_attr("href")
-                and re.search("/read/", cast(str, tag.get("href", default="")))
-                is not None
-                and tag.find_parent("div", attrs={"id": "chapters"})
-                is not None
+        if need_details:
+            title_element = soup.find("h1")
+            new_manga.title = (
+                title_element.get_text(strip=True)
+                if title_element
+                else new_manga.title
             )
 
-        chapters = []
-        chapter_elements = soup.find_all(is_chapter_link_element)
-
-        for chapter_element in chapter_elements:
-            chapter_title = cast(str | None, chapter_element.get("title"))
-
-            if chapter_title is None:
-                continue
-
-            title_match = re.search(
-                "Chapter (\\d+\\.\\d+|\\d+)", chapter_title
+            alt_titles_element = soup.find_all(
+                "li", attrs={"class": "select-all"}
+            )
+            new_manga.alt_titles = (
+                [e.get_text(strip=True) for e in alt_titles_element]
+                if alt_titles_element
+                else new_manga.alt_titles
             )
 
-            if title_match is None:
-                continue
-            else:
-                chapter_number = float(title_match[1])
+        if need_chapters:
+            chapters = []
+            chapter_elements = soup.find_all(self.is_chapter_link_element)
 
-            chapter_link = cast(str | None, chapter_element.get("href"))
+            for chapter_element in chapter_elements:
+                chapter_title = cast(str | None, chapter_element.get("title"))
 
-            if chapter_link is None:
-                continue
+                if chapter_title is None:
+                    continue
 
-            chapters.append(
-                MangaChapter(
-                    self.language,
-                    self.group_name,
-                    "chapter",
-                    chapter_number,
-                    None,
-                    f"Chapter {chapter_number:.1f}".rstrip("0").rstrip("."),
-                    f"{self.base_url}{chapter_link}"
-                    if not chapter_link.startswith("http")
-                    else chapter_link,
-                    chapter_link[chapter_link.rfind("/") + 1 :],
+                title_match = re.search(
+                    "Chapter (\\d+\\.\\d+|\\d+)", chapter_title
                 )
-            )
 
-        return MangaDetail(title, alt_titles, chapters)
+                if title_match is None:
+                    continue
+                else:
+                    chapter_number = float(title_match[1])
+
+                chapter_link = cast(str | None, chapter_element.get("href"))
+
+                if chapter_link is None:
+                    continue
+
+                chapters.append(
+                    Chapter(
+                        id=chapter_link[chapter_link.rfind("/") + 1 :],
+                        language="en",
+                        group=self.group_name,
+                        type="chapter",
+                        volume_number=None,
+                        chapter_number=chapter_number,
+                        title=clean_chapter_title(chapter_number),
+                        link=chapter_link,
+                    )
+                )
+
+            new_manga.chapters = chapters
+
+        return new_manga
 
     @override
-    async def on_fetch_manga_pages(
-        self,
-        manga_id: str,
-        manga_link: str,
-        chapter_id: str,
-        chapter_link: str,
-    ) -> Sequence[MangaPage]:
-        html = await self.get_html(chapter_link)
+    async def _on_get_page_list(
+        self, manga: Manga, chapter: Chapter
+    ) -> Sequence[Page]:
+        html = await self.client.get_text(chapter.link)
         soup = BeautifulSoup(html, "html.parser")
-
-        json_element = soup.find(
-            "div", attrs={"x-data": re.compile("^immersiveReader")}
-        )
-
-        if json_element is None:
-            return []
 
         pages = []
 
-        json_str = cast(str, json_element.get("x-data", default="")).strip()
-        match = re.search(
-            r"pages\s*:\s*JSON\.parse\s*\(\s*(['\"])(.*?)\1\s*\)",
-            json_str,
-            re.DOTALL,
+        x_data_element = soup.find(
+            "div", attrs={"x-data": re.compile("^immersiveReader")}
         )
 
-        if match is None:
-            # This is a premium chapter, we can't actually get the data here so we might as well guess?
-            page = 1
+        if x_data_element is None:
+            return pages
 
-            revision_element = soup.find("meta", {"property": "og:image"})
+        x_data = cast(str, x_data_element.get("x-data", default="{}"))
 
-            if revision_element is None:
-                return []
+        browser = await self.get_browser_context()
 
-            revision_id = cast(str | None, revision_element.get("content"))
+        async with await browser.new_page() as page:
+            x_data_json: Mapping[str, Any] = await page.evaluate(
+                f"""
+                (() => {{
+                    let immersiveReader = (params) => params;
+                    return {x_data};
+                }})()
+                """
+            )
 
-            if revision_id is not None and "/revisions/" not in revision_id:
-                revision_id = None
+            image_base_url = x_data_json.get("baseLink", self.base_cdn_url)
 
-            if revision_id is not None:
-                revision_id = revision_id[: revision_id.rfind("/")]
-                revision_id = revision_id[revision_id.rfind("/") + 1 :]
+            if not isinstance(image_base_url, str):
+                return pages
 
-            @retryable_client_session
-            async def test_page_response(link: str) -> bool:
-                async with self.session.head(link) as response:
-                    if response.ok:
-                        return True
-                    elif response.status == 404 or response.status == 403:
-                        return False
+            image_pages = x_data_json.get("pages", [])
+
+            if not isinstance(image_pages, Sequence):
+                return pages
+
+            if len(image_pages) == 0:
+                # This is a premium chapter, we can't actually get the data here so we might as well guess?
+                page = 1
+
+                revision_element = soup.find("meta", {"property": "og:image"})
+
+                if revision_element is None:
+                    return pages
+
+                revision_id = cast(str | None, revision_element.get("content"))
+
+                if (
+                    revision_id is not None
+                    and "/revisions/" not in revision_id
+                ):
+                    revision_id = None
+
+                if revision_id is not None:
+                    revision_id = revision_id[: revision_id.rfind("/")]
+                    revision_id = revision_id[revision_id.rfind("/") + 1 :]
+
+                while True:
+                    if revision_id is None:
+                        image_link = f"{self.base_cdn_url}/series/webtoon/{manga.id}/chapters/{chapter.id}/{page:03d}.jpg"
                     else:
-                        response.raise_for_status()
+                        image_link = f"{self.base_cdn_url}/series/webtoon/{manga.id}/chapters/{chapter.id}/revisions/{revision_id}/{page:03d}.jpg"
 
-                return False
-
-            while True:
-                if revision_id is None:
-                    image_link = f"{self.base_cdn_url}/series/webtoon/{manga_id}/chapters/{chapter_id}/{page:03d}.jpg"
-                else:
-                    image_link = f"{self.base_cdn_url}/series/webtoon/{manga_id}/chapters/{chapter_id}/revisions/{revision_id}/{page:03d}.jpg"
-
-                if await test_page_response(image_link):
-                    pages.append(MangaPage(page, image_link, None))
-                    page += 1
-                else:
-                    break
-        else:
-            encoded = match.group(2)
-            decoded = bytes(encoded, "utf-8").decode("unicode_escape")
-
-            try:
-                json_obj = json.loads(decoded)
-            except json.decoder.JSONDecodeError:
-                return []
-
-            if isinstance(json_obj, list):
-                json_pages = json_obj
-
-                for i, page in zip(range(len(json_pages)), json_pages):
-                    if isinstance(page, dict):
+                    if await self.test_page_response(image_link):
+                        pages.append(Page(page, image_link))
+                        page += 1
+                    else:
+                        break
+            else:
+                # Free Chapter
+                for idx, image in enumerate(image_pages):
+                    if isinstance(image, Mapping):
                         pages.append(
-                            MangaPage(
-                                i,
-                                f"{page.get('path', '').replace('\\', '')}",
-                                None,
+                            Page(
+                                idx,
+                                normalize_url(
+                                    image.get("path", ""), image_base_url
+                                ),
                             )
                         )
 
         return pages
+
+    @override
+    async def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(headers={"Referer": f"{self.base_url}/"})

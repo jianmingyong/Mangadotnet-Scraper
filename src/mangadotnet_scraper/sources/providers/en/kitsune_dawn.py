@@ -1,22 +1,20 @@
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
-from mangadotnet_scraper.sources.templates.keyoapp import (
-    KeyoAppLivewireTemplate,
-)
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
+from mangadotnet_scraper.sources.templates import KeyoAppLivewireTemplate
 
 
-class KitsuneDawnModule(KeyoAppLivewireTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+class KitsuneDawnSourceProvider(KeyoAppLivewireTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="kitsunedawn",
-            module_id="kitsune_dawn",
-            display_name="Kitsune Dawn",
-            language="en",
-            version=1,
-            base_url="https://kitsunedawn.com",
             base_cdn_url="https://cdn.kitsunedawn.com",
+            source_id="en.kitsune_dawn",
+            name="Kitsune Dawn",
+            version=1,
+            languages=["en"],
+            base_url="https://kitsunedawn.com",
         )
 
 
-ModuleManager.register_module(KitsuneDawnModule)
+SourceProvider.register_source(KitsuneDawnSourceProvider)

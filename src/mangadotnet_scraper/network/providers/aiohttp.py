@@ -2,7 +2,7 @@ import logging
 from abc import ABC
 from asyncio import Lock, sleep
 from collections.abc import Mapping
-from typing import Any, Final
+from typing import Any, Final, override
 
 from aiohttp import (
     AsyncResolver,
@@ -11,11 +11,13 @@ from aiohttp import (
     ClientResponse,
     ClientResponseError,
     ClientSession,
+    ClientTimeout,
     TCPConnector,
 )
+from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
-from mangadotnet_scraper_v2.camoufox_utils import get_cloudflare_cookies
-from mangadotnet_scraper_v2.network.base import (
+from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
+from mangadotnet_scraper.network.base import (
     BaseHttpClientProvider,
     HttpResponseError,
 )
@@ -25,6 +27,25 @@ class Middleware(ABC):
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
+        return await handler(request)
+
+
+class RateLimitMiddleware(Middleware):
+    _limiter: Final[LeakyBucketLimiter | Limiter | StrictLimiter | None]
+
+    def __init__(
+        self,
+        limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
+    ):
+        self._limiter = limiter
+
+    @override
+    async def __call__(
+        self, request: ClientRequest, handler: ClientHandlerType
+    ) -> ClientResponse:
+        if self._limiter is not None:
+            await self._limiter.wait()
+
         return await handler(request)
 
 
@@ -40,6 +61,7 @@ class CloudflareMiddleware(Middleware):
         self._cookies = {}
         self._lock = Lock()
 
+    @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
@@ -91,6 +113,7 @@ class RateLimitedMiddleware(Middleware):
         self._retry_wait_duration = retry_wait_duration
         self._lock = Lock()
 
+    @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
@@ -130,6 +153,7 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         user_agent: str | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
     ) -> None:
         resolver = AsyncResolver(nameservers=["1.1.1.1"])
         connector = TCPConnector(resolver=resolver, ttl_dns_cache=300)
@@ -142,94 +166,225 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         if user_agent is not None:
             _headers.update({"User-Agent": user_agent})
 
+        timeout = ClientTimeout(total=60, sock_connect=30)
+
         self._client = ClientSession(
             base_url=base_url,
             connector=connector,
             cookies=cookies,
             headers=_headers,
+            timeout=timeout,
             middlewares=[
                 RateLimitedMiddleware(),
                 CloudflareMiddleware(user_agent),
+                RateLimitMiddleware(limiter),
             ],
         )
 
+    @override
     async def close(self) -> None:
         await self._client.close()
 
+    @override
     async def get_text(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
         **kwargs,
     ) -> str:
         try:
             async with self._client.get(
                 url,
                 params=params,
-                data=data,
-                json=json,
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
             ) as response:
-                response.raise_for_status()
+                if raise_for_status:
+                    response.raise_for_status()
                 return await response.text(encoding="utf-8")
         except ClientResponseError as error:
-            raise HttpResponseError(error.status, error.message) from error
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
 
+    @override
     async def get_json(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
         **kwargs,
-    ) -> str:
+    ) -> Any:
         try:
             async with self._client.get(
                 url,
                 params=params,
-                data=data,
-                json=json,
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
             ) as response:
-                response.raise_for_status()
+                if raise_for_status:
+                    response.raise_for_status()
                 return await response.json(
                     encoding="utf-8",
                     content_type=response.content_type,
                 )
         except ClientResponseError as error:
-            raise HttpResponseError(error.status, error.message) from error
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
 
+    @override
     async def get_bytes(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
         **kwargs,
     ) -> bytes:
         try:
             async with self._client.get(
                 url,
                 params=params,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                if raise_for_status:
+                    response.raise_for_status()
+                return await response.read()
+        except ClientResponseError as error:
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
+
+    @override
+    async def head(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
+        **kwargs,
+    ) -> Mapping[str, str]:
+        try:
+            async with self._client.head(
+                url,
+                params=params,
                 data=data,
                 json=json,
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
             ) as response:
-                response.raise_for_status()
+                if raise_for_status:
+                    response.raise_for_status()
+                return response.headers
+        except ClientResponseError as error:
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
+
+    @override
+    async def post_text(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
+        **kwargs,
+    ) -> str:
+        try:
+            async with self._client.post(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                if raise_for_status:
+                    response.raise_for_status()
+                return await response.text(encoding="utf-8")
+        except ClientResponseError as error:
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
+
+    @override
+    async def post_json(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
+        **kwargs,
+    ) -> Any:
+        try:
+            async with self._client.post(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                if raise_for_status:
+                    response.raise_for_status()
+                return await response.json(
+                    encoding="utf-8",
+                    content_type=response.content_type,
+                )
+        except ClientResponseError as error:
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error
+
+    @override
+    async def post_bytes(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        raise_for_status: bool = True,
+        **kwargs,
+    ) -> bytes:
+        try:
+            async with self._client.post(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            ) as response:
+                if raise_for_status:
+                    response.raise_for_status()
                 return await response.read()
         except ClientResponseError as error:
-            raise HttpResponseError(error.status, error.message) from error
+            raise HttpResponseError(
+                error.status, error.message, error.headers
+            ) from error

@@ -1,27 +1,20 @@
-from typing import override
-
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
-class NyxScansModule(IkenTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+class NyxScansSourceProvider(IkenTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="Nyx Scans",
-            module_id="nyx_scans",
-            display_name="Nyx Scans",
-            language="en",
-            version=1,
-            base_url="https://nyxscans.com",
             base_api_url="https://api.nyxscans.com",
+            source_id="en.nyx_scans",
+            name="Nyx Scans",
+            version=1,
+            languages=["en"],
+            base_url="https://nyxscans.com",
         )
 
-    @override
-    async def initialize(self) -> None:
-        await super().initialize()
-        self.fetch_concurrency = 6
 
-
-ModuleManager.register_module(NyxScansModule)
+SourceProvider.register_source(NyxScansSourceProvider)

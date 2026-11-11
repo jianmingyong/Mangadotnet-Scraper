@@ -1,21 +1,21 @@
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.ezmanhwa import EzManhwaTemplate
 
 
-class QiScansModule(EzManhwaTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig) -> None:
+class QiScansSourceProvider(EzManhwaTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="Qi Manhwa",
-            module_id="qi_scans",
-            display_name="Qi Scans",
-            language="en",
-            version=1,
-            base_url="https://qimanga.com",
             base_api_url="https://api.qimanga.com",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0",
+            source_id="en.qi_scans",
+            name="Qi Scans",
+            version=1,
+            languages=["en"],
+            base_url="https://qimanga.com",
         )
 
 
-ModuleManager.register_module(QiScansModule)
+SourceProvider.register_source(QiScansSourceProvider)

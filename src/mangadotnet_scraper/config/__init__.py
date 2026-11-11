@@ -8,24 +8,20 @@ class Config:
     _provider: Final[ConfigProvider]
 
     @property
-    def data_file(self) -> str:
-        return self._get_config("data_file", str, "data.db")
-
-    @property
     def mangadotnet_username(self) -> str | None:
-        return self._get_config("mangadotnet_username", str)
+        return self._get_config("mangadotnet_username", str | None)
 
     @property
     def mangadotnet_password(self) -> str | None:
-        return self._get_config("mangadotnet_password", str)
+        return self._get_config("mangadotnet_password", str | None)
 
     @property
     def mangadotnet_otp(self) -> str | None:
-        return self._get_config("mangadotnet_otp", str)
+        return self._get_config("mangadotnet_otp", str | None)
 
     @property
     def mangadotnet_user_session(self) -> str | None:
-        return self._get_config("mangadotnet_user_session", str)
+        return self._get_config("mangadotnet_user_session", str | None)
 
     @mangadotnet_user_session.setter
     def mangadotnet_user_session(self, value: str | None) -> None:
@@ -69,7 +65,7 @@ class Config:
         self._provider.save()
 
     def get_source_config(self, source_id: str) -> Mapping[str, Any]:
-        return self._get_config(f"sources:{source_id}", Mapping[str, Any], {})
+        return self._get_config(f"sources:{source_id}", Mapping, {})
 
     def _get_config[T](
         self, key: str, expect_type: type[T], default: T = None

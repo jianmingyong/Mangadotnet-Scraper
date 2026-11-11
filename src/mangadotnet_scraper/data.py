@@ -129,7 +129,7 @@ class MangaDotNetScraperData(AbstractContextManager):
                     volume_number
                 ) WHERE type = "volume";
 
-                INSERT OR IGNORE INTO db_version (table_name, version) VALUES ("module_manga", 6), ("module_chapter", 5);
+                INSERT OR IGNORE INTO db_version (table_name, version) VALUES ("module_manga", 7), ("module_chapter", 5);
                 """
             )
 

@@ -27,18 +27,13 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
-import mangadotnet_scraper.sources.providers  # noqa: F401
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.data import (
-    MangaDotNetScraperData,
-    ModuleChapter,
-    ModuleManga,
-)
-from mangadotnet_scraper.mangabaka_api import MangaBakaApi
-from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-from mangadotnet_scraper.sources.base import BaseModule, FetchError
-from mangadotnet_scraper.sources.manager import ModuleManager
-from mangadotnet_scraper.utilities import dict_get_recursive
+from mangadotnet_scraper.app import App, AppBuilder
+
+# from mangadotnet_scraper.mangabaka_api import MangaBakaApi
+# from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
+# from mangadotnet_scraper.sources.base import BaseModule, FetchError
+# from mangadotnet_scraper.sources.manager import ModuleManager
+# from mangadotnet_scraper.utilities import dict_get_recursive
 
 
 def initialize() -> None:
@@ -51,12 +46,20 @@ def initialize() -> None:
     )
 
     try:
-        asyncio.run(initialize_async())
+        asyncio.run(
+            initialize_app(AppBuilder().with_default_providers().build_app())
+        )
+        # asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
     except Exception as error:
         print(error)
         logging.getLogger(__name__).exception("Unhandled exception caught")
+
+
+async def initialize_app(app: App) -> None:
+    async with app:
+        await app.run()
 
 
 async def initialize_async() -> None:

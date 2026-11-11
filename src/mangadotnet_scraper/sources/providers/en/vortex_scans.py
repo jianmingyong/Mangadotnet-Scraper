@@ -1,20 +1,20 @@
-from mangadotnet_scraper.config import MangaDotNetScraperConfig
-from mangadotnet_scraper.sources.manager import ModuleManager
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
-class VortexScansModule(IkenTemplate):
-    def __init__(self, config: MangaDotNetScraperConfig):
+class VortexScansSourceProvider(IkenTemplate):
+    def __init__(self, config: Config) -> None:
         super().__init__(
             config,
             group_name="Vortex Scans",
-            module_id="vortex_scans",
-            display_name="Vortex Scans",
-            language="en",
-            version=1,
-            base_url="https://vortexscans.org",
             base_api_url="https://api.vortexscans.org",
+            source_id="en.vortex_scans",
+            name="Vortex Scans",
+            version=1,
+            languages=["en"],
+            base_url="https://vortexscans.org",
         )
 
 
-ModuleManager.register_module(VortexScansModule)
+SourceProvider.register_source(VortexScansSourceProvider)
