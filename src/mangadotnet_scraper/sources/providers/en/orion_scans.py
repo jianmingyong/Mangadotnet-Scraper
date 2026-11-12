@@ -8,12 +8,12 @@ class OrionScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Orion Scans",
-            base_api_url="https://api.orion-scans.com",
             source_id="en.orion_scans",
             name="Orion Scans",
             version=1,
             languages=["en"],
             base_url="https://orion-scans.com",
+            base_api_url="https://api.orion-scans.com",
         )
 
 

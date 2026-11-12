@@ -27,7 +27,7 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
-from mangadotnet_scraper.app import App, AppBuilder
+from mangadotnet_scraper.app import App
 
 # from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 # from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
@@ -46,9 +46,7 @@ def initialize() -> None:
     )
 
     try:
-        asyncio.run(
-            initialize_app(AppBuilder().with_default_providers().build_app())
-        )
+        asyncio.run(initialize_app())
         # asyncio.run(initialize_async())
     except KeyboardInterrupt, SystemExit:
         pass
@@ -57,8 +55,8 @@ def initialize() -> None:
         logging.getLogger(__name__).exception("Unhandled exception caught")
 
 
-async def initialize_app(app: App) -> None:
-    async with app:
+async def initialize_app() -> None:
+    async with App() as app:
         await app.run()
 
 

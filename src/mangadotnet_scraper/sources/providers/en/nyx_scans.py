@@ -8,12 +8,12 @@ class NyxScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Nyx Scans",
-            base_api_url="https://api.nyxscans.com",
             source_id="en.nyx_scans",
             name="Nyx Scans",
             version=1,
             languages=["en"],
             base_url="https://nyxscans.com",
+            base_api_url="https://api.nyxscans.com",
         )
 
 

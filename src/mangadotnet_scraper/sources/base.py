@@ -10,12 +10,14 @@ from typing import (
     Required,
     Self,
     TypedDict,
+    Unpack,
     cast,
     override,
 )
 
+from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, BrowserContext, Error
+from playwright.async_api import Browser, Error
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import Config
@@ -67,21 +69,15 @@ class Chapter:
 
 @dataclass(frozen=True)
 class Page:
-    page_number: int
-    image_link: str
-    context_data: Mapping[str, Any] | None = None
+    page: int
+    link: str
+    context: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class ImageRequest:
     cookies: Mapping[str, str] | None = None
     headers: Mapping[str, str] | None = None
-
-
-@dataclass(frozen=True)
-class Image:
-    filename: str
-    data: bytes
 
 
 class SourceError(Exception):
@@ -94,8 +90,15 @@ class SourceInfo(TypedDict):
     version: Required[int]
     languages: Required[Sequence[str]]
 
-    base_url: NotRequired[str | None]
-    base_urls: NotRequired[Sequence[str] | None]
+    base_url: NotRequired[str]
+    base_urls: NotRequired[Sequence[str]]
+
+    base_api_url: NotRequired[str]
+    base_api_urls: NotRequired[Sequence[str]]
+    user_agent: NotRequired[str]
+    headers: NotRequired[Mapping[str, str]]
+    cookies: NotRequired[Mapping[str, str]]
+    limiter: NotRequired[LeakyBucketLimiter | Limiter | StrictLimiter]
 
 
 class BaseSourceProvider(AbstractAsyncContextManager):
@@ -109,39 +112,45 @@ class BaseSourceProvider(AbstractAsyncContextManager):
     base_url: str
     base_urls: Final[Sequence[str]]
 
+    base_api_url: str | None
+    base_api_urls: Sequence[str] | None
+    user_agent: str | None
+    headers: Mapping[str, str] | None
+    cookies: Mapping[str, str] | None
+    limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None
+
     settings: Mapping[str, Any]
 
     client: HttpClient
 
     _camoufox: AsyncCamoufox | None
     _browser: Browser | None
-    _browser_context: BrowserContext | None
 
     def __init__(
         self,
         config: Config,
-        source_id: str,
-        name: str,
-        languages: Sequence[str],
-        version: int,
-        base_url: str | None = None,
-        base_urls: Sequence[str] | None = None,
+        **kwargs: Unpack[SourceInfo],
     ) -> None:
         self.config = config
 
-        self.source_id = source_id
-        self.name = name
-        self.version = version
-        self.languages = languages
+        self.source_id = kwargs["source_id"]
+        self.name = kwargs["name"]
+        self.version = kwargs["version"]
+        self.languages = kwargs["languages"]
 
-        if base_url is None and base_urls is None:
+        if "base_url" not in kwargs and "base_urls" not in kwargs:
             raise SourceError(
                 "Source cannot be initilized as base_url or base_urls must be defined"
             )
 
-        self.base_urls = (
-            base_urls if base_urls is not None else [cast(str, base_url)]
-        )
+        self.base_urls = kwargs.get("base_urls", [kwargs["base_url"]])
+
+        self.base_api_url = kwargs.get("base_api_url")
+        self.base_api_urls = kwargs.get("base_api_urls")
+        self.user_agent = kwargs.get("user_agent")
+        self.headers = kwargs.get("headers")
+        self.cookies = kwargs.get("cookies")
+        self.limiter = kwargs.get("limiter")
 
     @override
     async def __aenter__(self) -> Self:
@@ -164,43 +173,54 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         self.settings = self.config.get_source_config(self.source_id)
         self.base_url = self.settings.get("base_url", self.base_urls[0])
 
-        self.client = HttpClient(self.base_url)
+        if self.base_api_urls is not None:
+            self.base_api_url = self.settings.get(
+                "base_api_url", self.base_api_urls[0]
+            )
+
+        await self.initialize_client()
 
         self._camoufox = None
         self._browser = None
-        self._browser_context = None
+
+    async def initialize_client(self) -> None:
+        base_url = (
+            self.base_api_url
+            if self.base_api_url is not None
+            else self.base_url
+        )
+
+        self.client = HttpClient(
+            base_url, self.user_agent, self.headers, self.cookies, self.limiter
+        )
+
+    async def get_browser(self) -> Browser:
+        if self._camoufox is None and self._browser is None:
+            try:
+                self._camoufox = create_browser()
+                self._browser = cast(Browser, await self._camoufox.start())
+            except Error:
+                if self._camoufox is not None:
+                    await self._camoufox.__aexit__()
+                self._camoufox = None
+                raise
+
+        return cast(Browser, self._browser)
 
     async def close(self) -> None:
+        if self.limiter is not None:
+            self.limiter.close()
+
         if self.client is not None:
             await self.client.close()
 
-        if self._browser_context is not None:
-            await self._browser_context.close()
-
         if self._browser is not None:
             await self._browser.close()
+            self._browser = None
 
         if self._camoufox is not None:
             await self._camoufox.__aexit__()
-
-    async def get_browser_context(self) -> BrowserContext:
-        if self._browser_context is None:
-            self._camoufox = (
-                create_browser() if self._camoufox is None else self._camoufox
-            )
-
-            try:
-                self._browser = (
-                    cast(Browser, await self._camoufox.start())
-                    if self._browser is None
-                    else self._browser
-                )
-                self._browser_context = await self._browser.new_context()
-            except Error:
-                await self._camoufox.__aexit__()
-                raise
-
-        return self._browser_context
+            self._camoufox = None
 
     async def get_manga_list(self) -> AsyncGenerator[Manga]:
         try:
@@ -249,12 +269,12 @@ class BaseSourceProvider(AbstractAsyncContextManager):
             seen: set[int] = set()
 
             for page in pages:
-                if page.page_number in seen:
+                if page.page in seen:
                     raise SourceError(
                         "Duplicate page number found. This might be a broken chapter."
                     )
                 else:
-                    seen.add(page.page_number)
+                    seen.add(page.page)
 
             return pages
         except Exception as error:

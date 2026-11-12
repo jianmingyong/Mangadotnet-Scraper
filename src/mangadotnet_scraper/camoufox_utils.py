@@ -41,6 +41,21 @@ def create_browser(
     )
 
 
+async def get_default_user_agent() -> str | None:
+    try:
+        async with (
+            create_browser() as browser,
+            await cast(Browser, browser).new_context() as context,
+        ):
+            page = await context.new_page()
+            return await page.evaluate("navigator.userAgent")
+    except Error:
+        logging.getLogger(__name__).exception(
+            "Failed to get camoufox user agent due to camoufox error"
+        )
+        return None
+
+
 async def get_cloudflare_cookies(
     url: str, user_agent: str | None = None
 ) -> tuple[str, str] | None:

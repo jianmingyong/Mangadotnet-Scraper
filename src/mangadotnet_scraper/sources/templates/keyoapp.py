@@ -177,7 +177,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
 
         x_data = cast(str, x_data_element.get("x-data", default="{}"))
 
-        browser = await self.get_browser_context()
+        browser = await self.get_browser()
 
         async with await browser.new_page() as page:
             x_data_json: Mapping[str, Any] = await page.evaluate(

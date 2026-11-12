@@ -31,9 +31,17 @@ class Config:
     def fetch_concurrency(self) -> int:
         return self._get_config("fetch_concurrency", int, 12)
 
+    @fetch_concurrency.setter
+    def fetch_concurrency(self, value: int) -> None:
+        self._set_config("fetch_concurrency", value)
+
     @property
     def download_concurrency(self) -> int:
         return self._get_config("download_concurrency", int, 12)
+
+    @download_concurrency.setter
+    def download_concurrency(self, value: int) -> None:
+        return self._set_config("download_concurrency", value)
 
     @property
     def download_max_retry(self) -> int:
@@ -53,7 +61,11 @@ class Config:
 
     @property
     def enabled_sources(self) -> Sequence[str]:
-        return self._get_config("enabled_sources", Sequence[str], [])
+        return self._get_config("enabled_sources", Sequence, [])
+
+    @enabled_sources.setter
+    def enabled_sources(self, value: Sequence[str]) -> None:
+        self._set_config("enabled_sources", value)
 
     def __init__(self, provider: ConfigProvider) -> None:
         self._provider = provider

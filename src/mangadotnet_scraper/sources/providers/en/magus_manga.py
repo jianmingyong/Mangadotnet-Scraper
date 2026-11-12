@@ -8,12 +8,12 @@ class MagusMangaSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="MagusManga",
-            base_api_url="https://api.magustoon.org",
             source_id="en.magus_manga",
             name="Magus Manga",
             version=1,
             languages=["en"],
             base_url="https://magustoon.org",
+            base_api_url="https://api.magustoon.org",
         )
 
 

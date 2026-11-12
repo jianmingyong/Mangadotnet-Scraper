@@ -8,12 +8,12 @@ class SanaScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Sana Scans",
-            base_api_url="https://api.sanascans.com",
             source_id="en.sana_scans",
             name="Sana Scans",
             version=1,
             languages=["en"],
             base_url="https://sanascans.com",
+            base_api_url="https://api.sanascans.com",
         )
 
 

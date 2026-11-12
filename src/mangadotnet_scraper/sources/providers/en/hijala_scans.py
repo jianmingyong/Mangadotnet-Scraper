@@ -8,12 +8,12 @@ class HijalaScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Hijala Translations",
-            base_api_url="https://api.en-hijala.com",
             source_id="en.hijala_scans",
             name="Hijala Scans",
             version=1,
             languages=["en"],
             base_url="https://en-hijala.com",
+            base_api_url="https://api.en-hijala.com",
         )
 
 

@@ -2,7 +2,6 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import Final, ReadOnly, TypedDict, Unpack, override
 
 from mangadotnet_scraper.config import Config
-from mangadotnet_scraper.network import HttpClient
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -73,35 +72,26 @@ class ChapterResponseObjectImages(TypedDict):
 
 class IkenTemplate(BaseSourceProvider):
     group_name: Final[str]
-    base_api_url: Final[str | None]
 
     def __init__(
         self,
         config: Config,
         group_name: str,
-        base_api_url: str | None = None,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
         super().__init__(config, **kwargs)
 
         self.group_name = group_name
-        self.base_api_url = base_api_url
 
     @override
-    async def initialize(self) -> None:
-        await super().initialize()
+    async def initialize_client(self) -> None:
+        if self.headers is None:
+            self.headers = {
+                "Origin": self.base_url,
+                "Referer": f"{self.base_url}/",
+            }
 
-        if self.base_api_url is not None:
-            if self.client is not None:
-                await self.client.close()
-
-            self.client = HttpClient(
-                self.base_api_url,
-                headers={
-                    "Origin": self.base_url,
-                    "Referer": f"{self.base_url}/",
-                },
-            )
+        await super().initialize_client()
 
     async def fetch_listing(self, page: int = 1) -> PostsResponse:
         return await self.client.get_json(

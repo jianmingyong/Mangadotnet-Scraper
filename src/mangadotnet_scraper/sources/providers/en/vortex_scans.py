@@ -8,12 +8,12 @@ class VortexScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Vortex Scans",
-            base_api_url="https://api.vortexscans.org",
             source_id="en.vortex_scans",
             name="Vortex Scans",
             version=1,
             languages=["en"],
             base_url="https://vortexscans.org",
+            base_api_url="https://api.vortexscans.org",
         )
 
 

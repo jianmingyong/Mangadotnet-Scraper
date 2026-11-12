@@ -1,17 +1,9 @@
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
-from typing import Final, Literal, ReadOnly, TypedDict, cast
+from typing import Final, Literal, ReadOnly, TypedDict, override
 
-from aiohttp import ClientResponse, ClientResponseError, ClientSession
-
-from mangadotnet_scraper.network import create_client, retryable_client_session
-from mangadotnet_scraper.utilities import dict_get_recursive
-
-
-class MangaBakaError(TypedDict):
-    status: ReadOnly[Literal[400, 404, 429, 500, 503, 504]]
-    message: ReadOnly[str]
+from mangadotnet_scraper.network import HttpClient
 
 
 class MangaBakaEntry(TypedDict):
@@ -34,112 +26,77 @@ class MangaBakaEntryDataTitle(TypedDict):
 
 
 class MangaBakaApi(AbstractAsyncContextManager):
-    _BASE_API_URL = "https://api.mangabaka.org"
-
-    _session: Final[ClientSession]
+    _client: Final[HttpClient]
 
     def __init__(self) -> None:
-        self._session = create_client(self._BASE_API_URL)
+        self._client = HttpClient("https://api.mangabaka.org")
 
+    @override
     async def __aexit__(self, *args) -> None:
         await self.close()
 
     async def close(self) -> None:
-        await self._session.close()
+        await self._client.close()
 
-    async def _raise_for_status(self, response: ClientResponse) -> None:
-        if not response.ok:
-            assert response.reason is not None
+    async def get_series_by_id(self, id: int) -> MangaBakaEntry:
+        return await self._client.get_json(f"/v2/series/{id}")
 
-            message = response.reason
+    async def match_series_by_title(self, title: str) -> MangaBakaEntries:
+        return await self._client.get_json(
+            "/v2/series/match",
+            params={
+                "q": title,
+                "type_not": "novel",
+                "limit": 10,
+                "schema": "full",
+            },
+        )
 
-            if response.content_type == "application/json":
-                json: MangaBakaError = await response.json()
-                error_message: str | None = dict_get_recursive(json, "message")
-                if error_message is not None:
-                    message = error_message
+    async def search_series_by_title(self, title: str) -> MangaBakaEntries:
+        return await self._client.get_json(
+            "/v2/series/search",
+            params={
+                "q": title,
+                "type_not": "novel",
+                "page": 1,
+                "limit": 10,
+                "schema": "full",
+            },
+        )
 
-            raise ClientResponseError(
-                response.request_info,
-                response.history,
-                status=response.status,
-                message=message,
-                headers=response.headers,
-            )
-
-    @retryable_client_session
-    async def get_entry_by_id(self, ids: int) -> MangaBakaEntryData:
-        async with self._session.get(f"/v2/series/{ids}") as response:
-            await self._raise_for_status(response)
-            json: MangaBakaEntry = await response.json()
-            return dict_get_recursive(json, "data", default={})
-
-    async def get_entry_by_title(
-        self, titles: str | Iterable[str]
-    ) -> MangaBakaEntryData | None:
-        if isinstance(titles, str):
-            titles = [titles]
-
+    async def get_id_by_title(self, titles: str | Iterable[str]) -> int | None:
         matches: list[MangaBakaEntryData] = []
 
-        @retryable_client_session
         async def do_exact_match(title: str) -> None:
-            async with self._session.get(
-                "/v2/series/match",
-                params={
-                    "q": title,
-                    "type_not": "novel",
-                },
-            ) as response:
-                await self._raise_for_status(response)
+            json = await self.match_series_by_title(title)
 
-                json: MangaBakaEntries = await response.json()
+            for data in json.get("data", []):
+                for matched_title in data.get("titles", []):
+                    match_base = title.casefold()
+                    match_target = matched_title.get("title", "").casefold()
 
-                for data in dict_get_recursive(json, "data", default=[]):
-                    for inner_title in dict_get_recursive(
-                        data, "titles", default=[]
-                    ):
-                        match_base = title.casefold().removesuffix("。")
-                        match_target = (
-                            cast(str, dict_get_recursive(inner_title, "title"))
-                            .casefold()
-                            .removesuffix("。")
-                        )
-
-                        if match_base == match_target:
-                            matches.append(data)
-                            break
+                    if match_base == match_target:
+                        matches.append(data)
+                        break
 
         for title in titles:
             await do_exact_match(title)
 
-        @retryable_client_session
         async def do_search(title: str) -> None:
-            async with self._session.get(
-                "/v2/series/search",
-                params={
-                    "q": title,
-                    "type_not": "novel",
-                },
-            ) as response:
-                await self._raise_for_status(response)
+            json = await self.search_series_by_title(title)
 
-                json: MangaBakaEntries = await response.json()
+            for data in json.get("data", []):
+                for matched_title in data.get("titles", []):
+                    match_base = title.casefold()
+                    match_target = matched_title.get("title", "").casefold()
 
-                for data in dict_get_recursive(json, "data", default=[]):
-                    for inner_title in dict_get_recursive(
-                        data, "titles", default=[]
-                    ):
-                        match_base = title.casefold().removesuffix("。")
-                        match_target = (
-                            cast(str, dict_get_recursive(inner_title, "title"))
-                            .casefold()
-                            .removesuffix("。")
-                        )
+                    if len(match_target) > 20:
+                        matches.append(data)
+                        break
 
-                        if match_base == match_target:
-                            matches.append(data)
-                            break
+                    if match_base == match_target:
+                        matches.append(data)
+                        break
 
         if len(matches) == 0:
             for title in titles:
@@ -148,10 +105,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
         if len(matches) == 0:
             return None
 
-        count = Counter(
-            dict_get_recursive(json_data, "id", default=0)
-            for json_data in matches
-        )
+        count = Counter(json_data.get("id", 0) for json_data in matches)
         common = count.most_common()
 
         common_id = None
@@ -171,8 +125,4 @@ class MangaBakaApi(AbstractAsyncContextManager):
         if duplicate:
             return None
 
-        for json_data in matches:
-            if dict_get_recursive(json_data, "id") == common_id:
-                return json_data
-
-        return None
+        return common_id

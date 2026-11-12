@@ -3,8 +3,8 @@ from typing import Final, TypedDict, Unpack, override
 
 from asynciolimiter import Limiter
 
+from mangadotnet_scraper.camoufox_utils import get_default_user_agent
 from mangadotnet_scraper.config import Config
-from mangadotnet_scraper.network import HttpClient
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -69,24 +69,16 @@ class MangaPageResponseImage(TypedDict):
 
 class EzManhwaTemplate(BaseSourceProvider):
     group_name: Final[str]
-    base_api_url: Final[str | None]
-    user_agent: Final[str | None]
-
-    limiter: Limiter
 
     def __init__(
         self,
         config: Config,
         group_name: str,
-        base_api_url: str | None = None,
-        user_agent: str | None = None,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
         super().__init__(config, **kwargs)
 
         self.group_name = group_name
-        self.base_api_url = base_api_url
-        self.user_agent = user_agent
 
     async def fetch_listing(self, page: int = 1) -> MangaListingResponse:
         return await self.client.get_json(
@@ -95,24 +87,23 @@ class EzManhwaTemplate(BaseSourceProvider):
         )
 
     @override
-    async def initialize(self) -> None:
-        await super().initialize()
-
-        self.limiter = Limiter(1, max_burst=60)
-
-        if self.base_api_url is not None:
-            if self.client is not None:
-                await self.client.close()
-
-            self.client = HttpClient(
-                self.base_api_url,
-                self.user_agent,
-                headers={
-                    "Origin": self.base_url,
-                    "Referer": f"{self.base_url}/",
-                },
-                limiter=self.limiter,
+    async def initialize_client(self) -> None:
+        if self.user_agent is None:
+            self.user_agent = (
+                await get_default_user_agent()
+                or "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0"
             )
+
+        if self.headers is None:
+            self.headers = {
+                "Origin": self.base_url,
+                "Referer": f"{self.base_url}/",
+            }
+
+        if self.limiter is None:
+            self.limiter = Limiter(1, max_burst=60)
+
+        await super().initialize_client()
 
     @override
     async def close(self) -> None:

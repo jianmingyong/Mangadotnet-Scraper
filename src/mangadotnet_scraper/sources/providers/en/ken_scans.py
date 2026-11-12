@@ -8,12 +8,12 @@ class KenScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="Kenscans",
-            base_api_url="https://api.kencomics.com",
             source_id="en.ken_scans",
             name="Ken Scans",
             version=1,
             languages=["en"],
             base_url="https://kencomics.com",
+            base_api_url="https://api.kencomics.com",
         )
 
 

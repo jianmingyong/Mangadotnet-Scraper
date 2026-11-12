@@ -8,13 +8,12 @@ class EzMangaSourceProvider(EzManhwaTemplate):
         super().__init__(
             config,
             group_name="Ezmanga",
-            base_api_url="https://vapi.ezmanga.org",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0",
             source_id="en.ez_manga",
             name="Ez Manga",
             version=1,
             languages=["en"],
             base_url="https://ezmanga.org",
+            base_api_url="https://vapi.ezmanga.org",
         )
 
 

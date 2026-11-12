@@ -8,12 +8,12 @@ class HiveScansSourceProvider(IkenTemplate):
         super().__init__(
             config,
             group_name="HiveToons",
-            base_api_url="https://api.hivetoons.org",
             source_id="en.hive_scans",
             name="Hive Toons",
             version=1,
             languages=["en"],
             base_url="https://hivetoons.org",
+            base_api_url="https://api.hivetoons.org",
         )
 
 
