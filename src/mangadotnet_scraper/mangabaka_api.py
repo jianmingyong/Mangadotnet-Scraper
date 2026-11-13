@@ -65,6 +65,9 @@ class MangaBakaApi(AbstractAsyncContextManager):
         )
 
     async def get_id_by_title(self, titles: str | Iterable[str]) -> int | None:
+        if isinstance(titles, str):
+            titles = [titles]
+
         matches: list[MangaBakaEntryData] = []
 
         async def do_exact_match(title: str) -> None:

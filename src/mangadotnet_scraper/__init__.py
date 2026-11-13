@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from asyncio import Semaphore, sleep
 from asyncio.taskgroups import TaskGroup
 from collections.abc import Sequence
@@ -27,6 +28,9 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
+if sys.platform == "linux":
+    import uvloop
+
 from mangadotnet_scraper.app import App
 
 # from mangadotnet_scraper.mangabaka_api import MangaBakaApi
@@ -46,8 +50,10 @@ def initialize() -> None:
     )
 
     try:
-        asyncio.run(initialize_app())
-        # asyncio.run(initialize_async())
+        if sys.platform == "linux":
+            uvloop.run(initialize_app())
+        else:
+            asyncio.run(initialize_app())
     except KeyboardInterrupt, SystemExit:
         pass
     except Exception as error:

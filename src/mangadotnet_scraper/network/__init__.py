@@ -7,7 +7,7 @@ from typing import Any, Final
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
-from mangadotnet_scraper.network.base import HttpResponseError
+from mangadotnet_scraper.network.base import HttpResponseError, Response
 
 from .base import BaseHttpClientProvider
 from .providers import AioHttpClientProvider
@@ -83,65 +83,39 @@ class HttpClient(AbstractAsyncContextManager):
     async def close(self) -> None:
         await self._provider.close()
 
-    @retryable_client_method
-    async def get_text(
+    async def get(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> str:
-        return await self._provider.get_text(
+    ) -> Response:
+        return await self._provider.get(
             url,
             params,
             cookies,
             headers,
-            raise_for_status,
             **kwargs,
         )
 
-    @retryable_client_method
-    async def get_json(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
-        **kwargs,
-    ) -> Any:
-        return await self._provider.get_json(
-            url,
-            params,
-            cookies,
-            headers,
-            raise_for_status,
-            **kwargs,
-        )
-
-    @retryable_client_method
-    async def get_bytes(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
-        **kwargs,
-    ) -> bytes:
-        return await self._provider.get_bytes(
-            url,
-            params,
-            cookies,
-            headers,
-            raise_for_status,
-            **kwargs,
-        )
-
-    @retryable_client_method
     async def head(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return await self._provider.head(
+            url,
+            params,
+            cookies,
+            headers,
+            **kwargs,
+        )
+
+    async def post(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
@@ -149,17 +123,95 @@ class HttpClient(AbstractAsyncContextManager):
         json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> Mapping[str, str]:
-        return await self._provider.head(
+    ) -> Response:
+        return await self._provider.post(
             url,
             params,
             data,
             json,
             cookies,
             headers,
-            raise_for_status,
+            **kwargs,
+        )
+
+    async def put(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return await self._provider.put(
+            url,
+            params,
+            data,
+            json,
+            cookies,
+            headers,
+            **kwargs,
+        )
+
+    async def delete(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return await self._provider.delete(
+            url,
+            params,
+            data,
+            json,
+            cookies,
+            headers,
+            **kwargs,
+        )
+
+    async def options(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return await self._provider.options(
+            url,
+            params,
+            data,
+            json,
+            cookies,
+            headers,
+            **kwargs,
+        )
+
+    async def patch(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return await self._provider.patch(
+            url,
+            params,
+            data,
+            json,
+            cookies,
+            headers,
             **kwargs,
         )
 

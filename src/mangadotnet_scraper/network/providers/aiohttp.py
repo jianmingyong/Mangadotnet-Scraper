@@ -7,9 +7,9 @@ from typing import Any, Final, override
 from aiohttp import (
     AsyncResolver,
     ClientHandlerType,
+    ClientPayloadError,
     ClientRequest,
     ClientResponse,
-    ClientResponseError,
     ClientSession,
     ClientTimeout,
     TCPConnector,
@@ -19,8 +19,49 @@ from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 from mangadotnet_scraper.network.base import (
     BaseHttpClientProvider,
-    HttpResponseError,
+    RequestInfo,
+    Response,
 )
+
+
+class AioClientResponse(Response):
+    _response: ClientResponse
+
+    def __init__(self, response: ClientResponse) -> None:
+        super().__init__(
+            RequestInfo(
+                str(response.request_info.url),
+                response.request_info.method,
+                response.request_info.headers,
+            ),
+            response.status,
+            response.headers,
+            response.reason,
+        )
+        self._response = response
+
+    async def read(self) -> bytes:
+        try:
+            return await self._response.read()
+        except ClientPayloadError as error:
+            raise OSError() from error
+
+    async def text(self, encoding: str | None = None) -> str:
+        try:
+            return await self._response.text(encoding)
+        except ClientPayloadError as error:
+            raise OSError() from error
+
+    async def json(self, encoding: str | None = None) -> Any:
+        try:
+            return await self._response.json(
+                encoding=encoding, content_type=None
+            )
+        except ClientPayloadError as error:
+            raise OSError() from error
+
+    async def close(self) -> None:
+        self._response.close()
 
 
 class Middleware(ABC):
@@ -154,6 +195,7 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
         limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
+        **kwargs,
     ) -> None:
         resolver = AsyncResolver(nameservers=["1.1.1.1"])
         connector = TCPConnector(resolver=resolver, ttl_dns_cache=300)
@@ -179,6 +221,7 @@ class AioHttpClientProvider(BaseHttpClientProvider):
                 CloudflareMiddleware(user_agent),
                 RateLimitMiddleware(limiter),
             ],
+            **kwargs,
         )
 
     @override
@@ -186,118 +229,45 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         await self._client.close()
 
     @override
-    async def get_text(
+    async def get(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> str:
-        try:
-            async with self._client.get(
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.get(
                 url,
                 params=params,
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.text(encoding="utf-8")
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
-
-    @override
-    async def get_json(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
-        **kwargs,
-    ) -> Any:
-        try:
-            async with self._client.get(
-                url,
-                params=params,
-                cookies=cookies,
-                headers=headers,
-                **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.json(
-                    encoding="utf-8",
-                    content_type=response.content_type,
-                )
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
-
-    @override
-    async def get_bytes(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
-        **kwargs,
-    ) -> bytes:
-        try:
-            async with self._client.get(
-                url,
-                params=params,
-                cookies=cookies,
-                headers=headers,
-                **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.read()
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
+            )
+        )
 
     @override
     async def head(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> Mapping[str, str]:
-        try:
-            async with self._client.head(
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.head(
                 url,
                 params=params,
-                data=data,
-                json=json,
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return response.headers
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
+            )
+        )
 
     @override
-    async def post_text(
+    async def post(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
@@ -305,11 +275,10 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> str:
-        try:
-            async with self._client.post(
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.post(
                 url,
                 params=params,
                 data=data,
@@ -317,17 +286,11 @@ class AioHttpClientProvider(BaseHttpClientProvider):
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.text(encoding="utf-8")
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
+            )
+        )
 
     @override
-    async def post_json(
+    async def put(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
@@ -335,11 +298,10 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> Any:
-        try:
-            async with self._client.post(
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.put(
                 url,
                 params=params,
                 data=data,
@@ -347,20 +309,11 @@ class AioHttpClientProvider(BaseHttpClientProvider):
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.json(
-                    encoding="utf-8",
-                    content_type=response.content_type,
-                )
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
+            )
+        )
 
     @override
-    async def post_bytes(
+    async def delete(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
@@ -368,11 +321,10 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         json: Any | None = None,
         cookies: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-        raise_for_status: bool = True,
         **kwargs,
-    ) -> bytes:
-        try:
-            async with self._client.post(
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.delete(
                 url,
                 params=params,
                 data=data,
@@ -380,11 +332,51 @@ class AioHttpClientProvider(BaseHttpClientProvider):
                 cookies=cookies,
                 headers=headers,
                 **kwargs,
-            ) as response:
-                if raise_for_status:
-                    response.raise_for_status()
-                return await response.read()
-        except ClientResponseError as error:
-            raise HttpResponseError(
-                error.status, error.message, error.headers
-            ) from error
+            )
+        )
+
+    @override
+    async def options(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.options(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            )
+        )
+
+    @override
+    async def patch(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        data: Any | None = None,
+        json: Any | None = None,
+        cookies: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        **kwargs,
+    ) -> Response:
+        return AioClientResponse(
+            await self._client.patch(
+                url,
+                params=params,
+                data=data,
+                json=json,
+                cookies=cookies,
+                headers=headers,
+                **kwargs,
+            )
+        )
