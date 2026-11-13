@@ -19,12 +19,9 @@ from typing import (
 )
 
 from aiohttp import (
-    ClientConnectionError,
-    ClientError,
     ClientHandlerType,
     ClientRequest,
     ClientResponse,
-    ClientResponseError,
     FormData,
 )
 from playwright.async_api import (
@@ -47,6 +44,7 @@ from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
     HttpClient,
+    HttpResponseError,
     Response,
     create_http_client,
     retryable_client_method,
@@ -75,6 +73,25 @@ class MangaDotNetProfileData(TypedDict):
     email: ReadOnly[str]
 
 
+class MangaDotNetSearch(TypedDict):
+    manga_list: ReadOnly[Sequence[MangaDotNetSearchMangaList]]
+
+
+class MangaDotNetSearchMangaList(TypedDict):
+    id: ReadOnly[int]
+    title: ReadOnly[str]
+
+
+class MangaDotNetMangaEntry(TypedDict):
+    manga: ReadOnly[MangaDotNetMangaEntryData]
+
+
+class MangaDotNetMangaEntryData(TypedDict):
+    id: ReadOnly[int]
+    title: ReadOnly[str]
+    alt_titles: ReadOnly[Sequence[str]]
+
+
 class MangaDotNetChapterList(TypedDict):
     id: ReadOnly[int]
     chapter_number: ReadOnly[float | None]
@@ -97,18 +114,7 @@ class MangaDotNetVolumeList(TypedDict):
     groups: ReadOnly[Sequence[MangaDotNetChapterListGroup]]
 
 
-class MangaDotNetMangaEntry(TypedDict):
-    manga: ReadOnly[MangaDotNetMangaEntryData]
-
-
-class MangaDotNetMangaEntryData(TypedDict):
-    id: ReadOnly[int]
-    title: ReadOnly[str]
-    alt_titles: ReadOnly[Sequence[str]]
-
-
 class MangaDotNetGroupList(TypedDict):
-    success: ReadOnly[Literal[True]]
     groups: ReadOnly[Sequence[MangaDotNetGroupListData]]
 
 
@@ -247,7 +253,9 @@ class MangaDotNetLoginMiddleware(Middleware):
                 ) as solver:
                     response = cast(
                         PlaywrightResponse,
-                        await page.goto("https://mangadot.net/login"),
+                        await page.goto(
+                            f"{self._mangadotnet_api._BASE_URL}/login"
+                        ),
                     )
 
                     cf_header = await response.header_value("cf-mitigated")
@@ -386,7 +394,7 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                 try:
                     await page.wait_for_url(
-                        "https://mangadot.net",
+                        self._mangadotnet_api._BASE_URL,
                         wait_until="domcontentloaded",
                     )
                 except TimeoutError:
@@ -396,7 +404,9 @@ class MangaDotNetLoginMiddleware(Middleware):
                     )
                     return None
 
-                cookies = await context.cookies("https://mangadot.net")
+                cookies = await context.cookies(
+                    self._mangadotnet_api._BASE_URL
+                )
 
                 for cookie in cookies:
                     if cookie.get("name") == self._AUTHENTICATION_COOKIE:
@@ -414,6 +424,7 @@ class MangaDotNetLoginMiddleware(Middleware):
 
 
 class MangaDotNetApi(AbstractAsyncContextManager):
+    _BASE_URL = "https://mangadot.net"
     _TUS_VERSION = "1.0.0"
     _TUS_MAX_UPLOAD_SIZE = 900 * 1024 * 1024
 
@@ -493,7 +504,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     def __init__(self, config: Config) -> None:
         self._config = config
         self._client = create_http_client(
-            "https://mangadot.net",
+            self._BASE_URL,
             middlewares=[
                 RateLimitedMiddleware(),
                 MangaDotNetLoginMiddleware(config, self),
@@ -516,6 +527,92 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             response: Response
             response.raise_for_status()
             return await response.json()
+
+    @retryable_client_method
+    async def search_title(self, title: str) -> MangaDotNetSearch:
+        async with await self._client.get(
+            "/api/search",
+            {"search": title, "sortBy": "relevance", "limit": 10},
+        ) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
+
+    @retryable_client_method
+    async def get_entry_by_id(
+        self, mangadotnet_id: int
+    ) -> MangaDotNetMangaEntry:
+        async with await self._client.get(
+            f"/api/manga/{mangadotnet_id}"
+        ) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
+
+    async def get_entry_by_title(
+        self, titles: str | Iterable[str]
+    ) -> int | None:
+        if isinstance(titles, str):
+            titles = [titles]
+
+        matches = []
+
+        for title in titles:
+            json = await self.search_title(title)
+
+            for manga in json.get("manga_list", []):
+                manga_id = manga.get("id")
+
+                if manga_id is None:
+                    continue
+
+                manga_entry = await self.get_entry_by_id(manga_id)
+                target_manga = manga_entry.get("manga")
+
+                if target_manga is None:
+                    continue
+
+                match_base = title.casefold()
+
+                for match_target in [
+                    target_manga.get("title"),
+                    *target_manga.get("alt_titles", []),
+                ]:
+                    match_target = match_target.casefold()
+
+                    if match_base == match_target:
+                        id = target_manga.get("id")
+
+                        if id is None:
+                            continue
+
+                        matches.append(id)
+                        break
+
+        if len(matches) == 0:
+            return None
+
+        count = Counter(matches)
+        common = count.most_common()
+
+        common_id = None
+        max_freq = 0
+        duplicate = False
+
+        for match_id, freq in common:
+            if freq > max_freq:
+                max_freq = freq
+                common_id = match_id
+                continue
+
+            if freq == max_freq:
+                duplicate = True
+                break
+
+        if duplicate:
+            return None
+
+        return common_id
 
     @retryable_client_method
     async def get_chapters_by_id(
@@ -554,159 +651,21 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 return None
 
     @retryable_client_method
-    async def get_entry_by_id(
-        self, mangadotnet_id: int
-    ) -> MangaDotNetMangaEntry:
-        async with self._client.get(
-            f"/api/manga/{mangadotnet_id}"
-        ) as response:
-            await self._raise_for_status(response)
-            return await response.json(content_type=response.content_type)
-
-    async def get_entry_by_title(
-        self, titles: str | Iterable[str]
-    ) -> MangaDotNetMangaEntry | None:
-        if isinstance(titles, str):
-            titles = [titles]
-
-        matches = []
-
-        for title in titles:
-            async with self._client.get(
-                "/api/search",
-                params={"search": title, "sortBy": "relevance", "limit": 10},
-            ) as response:
-                await self._raise_for_status(response)
-                json = await response.json(content_type=response.content_type)
-
-                for manga in dict_get_recursive(
-                    json, "manga_list", default=[]
-                ):
-                    manga_id = dict_get_recursive(manga, "id")
-
-                    if manga_id is None:
-                        continue
-
-                    manga_entry = await self.get_entry_by_id(manga_id)
-
-                    if (
-                        title.casefold()
-                        == cast(
-                            str,
-                            dict_get_recursive(manga_entry, "manga", "title"),
-                        ).casefold()
-                    ):
-                        matches.append(manga_entry)
-                        continue
-
-                    for manga_title in dict_get_recursive(
-                        manga_entry, "manga", "alt_titles", default=[]
-                    ):
-                        if (
-                            title.casefold()
-                            == cast(str, manga_title).casefold()
-                        ):
-                            matches.append(manga_entry)
-                            break
-
-        if len(matches) == 0:
-            return None
-
-        count = Counter(
-            dict_get_recursive(json_data, "manga", "id")
-            for json_data in matches
-        )
-        common = count.most_common()
-
-        common_id = None
-        max_freq = 0
-        duplicate = False
-
-        for match_id, freq in common:
-            if freq > max_freq:
-                max_freq = freq
-                common_id = match_id
-                continue
-
-            if freq == max_freq:
-                duplicate = True
-                break
-
-        if duplicate:
-            return None
-
-        for json_data in matches:
-            if dict_get_recursive(json_data, "manga", "id") == common_id:
-                return json_data
-
-        return None
-
-    @retryable_client_method
     async def get_group_ids(self, name: str) -> MangaDotNetGroupList:
-        async with self._client.get(
+        async with await self._client.get(
             "/api/groups/lookup", params={"q": name, "limit": 10}
         ) as response:
-            await self._raise_for_status(response)
-            return await response.json(content_type=response.content_type)
-
-    @dataclass(frozen=True)
-    class MangaDotNetBatchInitRequest:
-        manga_id: int
-        language: str
-        group_ids: Sequence[int] | None
-        type: Literal["chapter", "volume"]
-        scanlator_name: str | None
-        chapters: Sequence[MangaDotNetApi.MangaDotNetBatchInitRequestChapter]
-
-        def to_dict(self) -> dict:
-            return {
-                "manga_id": self.manga_id,
-                "language": self.language,
-                "group_ids": self.group_ids,
-                "type": self.type,
-                "scanlator_name": self.scanlator_name,
-                "chapters": [chapter.to_dict() for chapter in self.chapters],
-            }
-
-    @dataclass(frozen=True)
-    class MangaDotNetBatchInitRequestChapter:
-        chapter_number: float | None
-        volume_number: float | None
-        chapter_title: str
-
-        def to_dict(self) -> dict:
-            return {
-                "chapter_number": self.chapter_number,
-                "volume_number": self.volume_number,
-                "chapter_title": self.chapter_title,
-            }
-
-    @retryable_client_method
-    async def start_batch(
-        self, request: MangaDotNetBatchInitRequest
-    ) -> MangaDotNetBatchInitResponse:
-        async with self._client.post(
-            "/api/uploads/batch/init", json=request.to_dict()
-        ) as response:
-            await self._raise_for_status(response)
-            return await response.json(content_type=response.content_type)
-
-    @retryable_client_method
-    async def end_batch(
-        self, batch_id: str
-    ) -> MangaDotNetBatchCompleteResponse:
-        async with self._client.post(
-            f"/api/uploads/batch/{batch_id}/complete"
-        ) as response:
-            await self._raise_for_status(response)
-            return await response.json(content_type=response.content_type)
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
     @retryable_client_method
     async def get_tus_capabilities(self) -> MangaDotNetTusCapabilities:
-        async with self._client.options(
-            "/api/tus", headers={"Origin": MangaDotNetApi._BASE_API_URL}
+        async with await self._client.options(
+            "/api/tus", headers={"Origin": self._BASE_URL}
         ) as response:
-            await self._raise_for_status(response)
+            response: Response
+            response.raise_for_status()
             return MangaDotNetTusCapabilities(
                 response.headers.get("Tus-Version", self._TUS_VERSION).split(
                     ","
@@ -729,7 +688,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         language: str
         chapter_title: str | None
         group_ids: list[int] | None
-        group_id: int | None
         scanlator_name: str | None
         upload_type: Literal["chapter", "volume"] | None
         batch_id: str | None
@@ -753,9 +711,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             if self.group_ids is not None:
                 result["group_ids"] = self.group_ids
 
-            if self.group_id is not None:
-                result["group_id"] = self.group_id
-
             if self.scanlator_name is not None:
                 result["scanlator_name"] = self.scanlator_name
 
@@ -774,24 +729,25 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     async def prepare_upload(
         self, file_size: int, metadata: MangaDotNetTusUploadMetadata
     ) -> str:
-        async with self._client.post(
+        async with await self._client.post(
             "/api/tus/",
             headers={
-                "Referer": f"{self._BASE_API_URL}/upload",
                 "Tus-Resumable": self._TUS_VERSION,
                 "Upload-Length": f"{file_size:d}",
                 "Upload-Metadata": self._parse_metadata(metadata.to_dict()),
             },
         ) as response:
-            await self._raise_for_status(response)
+            response: Response
+            response.raise_for_status()
             return response.headers.get("Location", "")
 
     @retryable_client_method
     async def get_upload_offset(self, location: str) -> int:
-        async with self._client.head(
+        async with await self._client.head(
             location, headers={"Tus-Resumable": self._TUS_VERSION}
         ) as response:
-            await self._raise_for_status(response)
+            response: Response
+            response.raise_for_status()
             return int(response.headers.get("Upload-Offset", 0))
 
     async def upload_file(
@@ -799,8 +755,8 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         location: str,
         file: IO[bytes],
         progress: Callable[[int], None],
-        max_retry=5,
-    ):
+        max_retry: int = 5,
+    ) -> bool:
         offset = await self.get_upload_offset(location)
         need_new_offset = False
         retry = 0
@@ -817,12 +773,12 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
                 file.seek(offset)
 
-                data: bytes = file.read(self._tus_chunk_size)
+                data = file.read(self._tus_chunk_size)
 
                 if len(data) == 0:
                     break
 
-                async with self._client.patch(
+                async with await self._client.patch(
                     location,
                     headers={
                         "Content-Type": "application/offset+octet-stream",
@@ -831,7 +787,8 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                     },
                     data=data,
                 ) as response:
-                    await self._raise_for_status(response)
+                    response: Response
+                    response.raise_for_status()
 
                     offset = int(response.headers.get("Upload-Offset", 0))
                     progress(offset)
@@ -843,17 +800,11 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 await sleep(retry_duration)
                 retry += 1
                 retry_duration *= 2
-            except ClientError as error:
-                if isinstance(error, ClientResponseError):
-                    if error.status in self._NON_RESUMABLE_ERROR:
-                        raise
-                    else:
-                        # Some error occured but we can probably resume
-                        await sleep(retry_duration)
-                        retry += 1
-                        retry_duration *= 2
-                elif isinstance(error, ClientConnectionError):
-                    # Client got disconnected and needed time to recover.
+            except HttpResponseError as error:
+                if error.status in self._NON_RESUMABLE_ERROR:
+                    raise
+                else:
+                    # Some error occured but we can probably resume
                     await sleep(retry_duration)
                     retry += 1
                     retry_duration *= 2
@@ -899,24 +850,26 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     async def get_uploaded_manga(
         self, mangadotnet_id: int, page: int = 1
     ) -> MangaDotNetUploadedMangaList:
-        async with self._client.get(
+        async with await self._client.get(
             "/api/uploads/mine",
             params={"manga_id": mangadotnet_id, "limit": 100, "page": page},
         ) as response:
-            await self._raise_for_status(response)
-            return await response.json(content_type=response.content_type)
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
     async def create_from_mangabaka(
         self, mangabaka_id: int
     ) -> MangaDotNetCreateFromMangaBakaResponse:
         @retryable_client_method
         async def fetch_mangabaka(id: int) -> MangaDotNetFetchMangaBaka:
-            async with self._client.post(
+            async with await self._client.post(
                 "/api/manga/fetch-mangabaka",
                 json={"url": f"https://mangabaka.org/manga/{id}"},
             ) as response:
-                await self._raise_for_status(response)
-                return await response.json(content_type=response.content_type)
+                response: Response
+                response.raise_for_status()
+                return await response.json()
 
         mb_json = await fetch_mangabaka(mangabaka_id)
 
@@ -939,10 +892,11 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             json: MangaDotNetFetchMangaBakaData,
         ) -> MangaDotNetCreateFromMangaBakaResponse:
             form_data = FormData(parse_json(json), default_to_multipart=True)
-            async with self._client.post(
+            async with await self._client.post(
                 "/api/manga/create-from-mangabaka", data=form_data
             ) as response:
-                await self._raise_for_status(response)
-                return await response.json(content_type=response.content_type)
+                response: Response
+                response.raise_for_status()
+                return await response.json()
 
         return await create_entry(dict_get_recursive(mb_json, "data"))
