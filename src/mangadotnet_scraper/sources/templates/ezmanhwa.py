@@ -80,14 +80,15 @@ class EzManhwaTemplate(BaseSourceProvider):
 
         self.group_name = group_name
 
-    async def fetch_listing(self, page: int = 1) -> MangaListingResponse:
-        return await self.client.get_json(
-            "/api/v1/series",
-            params={"page": page, "perPage": 100, "sort": "newest"},
-        )
+    @override
+    async def close(self) -> None:
+        await super().close()
+
+        if self.limiter is not None:
+            self.limiter.close()
 
     @override
-    async def initialize_client(self) -> None:
+    async def _on_initialize(self) -> None:
         if self.user_agent is None:
             self.user_agent = (
                 await get_default_user_agent()
@@ -103,32 +104,16 @@ class EzManhwaTemplate(BaseSourceProvider):
         if self.limiter is None:
             self.limiter = Limiter(1, max_burst=60)
 
-        await super().initialize_client()
-
-    @override
-    async def close(self) -> None:
-        await super().close()
-
-        if self.limiter is not None:
-            self.limiter.close()
-
-    async def get_chapters(
-        self, slug_id: str, cursor: str | None
-    ) -> MangaChapterResponse:
-        return await self.client.get_json(
-            f"/api/v2/series/{slug_id}/chapters",
-            params={"limit": 100, "sort": "asc"}
-            if cursor is None
-            else {"limit": 100, "sort": "asc", "cursor": cursor},
-        )
-
     @override
     async def _on_get_manga_list(self) -> AsyncGenerator[Manga]:
         page = 1
         has_next_page = True
 
         while has_next_page:
-            json = await self.fetch_listing(page)
+            json: MangaListingResponse = await self.get_json(
+                "/api/v1/series",
+                params={"page": page, "perPage": 100, "sort": "newest"},
+            )
 
             for data in dict_get_recursive(json, "data", default=[]):
                 if (
@@ -164,7 +149,7 @@ class EzManhwaTemplate(BaseSourceProvider):
         slug_id = manga.link[manga.link.rindex("/") + 1 :]
 
         if need_details:
-            detail_json: MangaDetailResponse = await self.client.get_json(
+            detail_json: MangaDetailResponse = await self.get_json(
                 f"/api/v1/series/{slug_id}"
             )
 
@@ -185,7 +170,12 @@ class EzManhwaTemplate(BaseSourceProvider):
             cursor = None
 
             while has_more:
-                chapters_json = await self.get_chapters(slug_id, cursor)
+                chapters_json: MangaChapterResponse = await self.get_json(
+                    f"/api/v2/series/{slug_id}/chapters",
+                    params={"limit": 100, "sort": "asc"}
+                    if cursor is None
+                    else {"limit": 100, "sort": "asc", "cursor": cursor},
+                )
 
                 for data in dict_get_recursive(
                     chapters_json, "data", default=[]
@@ -236,7 +226,7 @@ class EzManhwaTemplate(BaseSourceProvider):
 
         manga_pages = []
 
-        json: MangaPageResponse = await self.client.get_json(
+        json: MangaPageResponse = await self.get_json(
             f"/api/v1/series/{manga_slug}/chapters/{chapter_slug}"
         )
 
@@ -252,5 +242,7 @@ class EzManhwaTemplate(BaseSourceProvider):
         return manga_pages
 
     @override
-    async def _on_get_image_request(self, page: Page) -> ImageRequest:
-        return ImageRequest(headers={"Referer": f"{self.base_url}/"})
+    def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(
+            url=page.link, headers={"Referer": f"{self.base_url}/"}
+        )

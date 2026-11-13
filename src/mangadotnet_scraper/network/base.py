@@ -44,6 +44,9 @@ class Response(AbstractAsyncContextManager):
         await self.close()
 
     @abstractmethod
+    async def close(self) -> None: ...
+
+    @abstractmethod
     async def read(self) -> bytes: ...
 
     @abstractmethod
@@ -60,9 +63,6 @@ class Response(AbstractAsyncContextManager):
             raise HttpResponseError(
                 self.request, self.status, self.reason, self.headers
             )
-
-    @abstractmethod
-    async def close(self) -> None: ...
 
 
 class HttpResponseError(Exception):

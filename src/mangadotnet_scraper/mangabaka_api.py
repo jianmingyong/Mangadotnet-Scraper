@@ -3,7 +3,12 @@ from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Final, Literal, ReadOnly, TypedDict, override
 
-from mangadotnet_scraper.network import HttpClient
+from mangadotnet_scraper.network import (
+    HttpClient,
+    Response,
+    create_http_client,
+    retryable_client_method,
+)
 
 
 class MangaBakaEntry(TypedDict):
@@ -29,7 +34,7 @@ class MangaBakaApi(AbstractAsyncContextManager):
     _client: Final[HttpClient]
 
     def __init__(self) -> None:
-        self._client = HttpClient("https://api.mangabaka.org")
+        self._client = create_http_client("https://api.mangabaka.org")
 
     @override
     async def __aexit__(self, *args) -> None:
@@ -38,11 +43,16 @@ class MangaBakaApi(AbstractAsyncContextManager):
     async def close(self) -> None:
         await self._client.close()
 
+    @retryable_client_method
     async def get_series_by_id(self, id: int) -> MangaBakaEntry:
-        return await self._client.get_json(f"/v2/series/{id}")
+        async with await self._client.get(f"/v2/series/{id}") as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
+    @retryable_client_method
     async def match_series_by_title(self, title: str) -> MangaBakaEntries:
-        return await self._client.get_json(
+        async with await self._client.get(
             "/v2/series/match",
             params={
                 "q": title,
@@ -50,10 +60,14 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 "limit": 10,
                 "schema": "full",
             },
-        )
+        ) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
+    @retryable_client_method
     async def search_series_by_title(self, title: str) -> MangaBakaEntries:
-        return await self._client.get_json(
+        async with await self._client.get(
             "/v2/series/search",
             params={
                 "q": title,
@@ -62,7 +76,10 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 "limit": 10,
                 "schema": "full",
             },
-        )
+        ) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
     async def get_id_by_title(self, titles: str | Iterable[str]) -> int | None:
         if isinstance(titles, str):

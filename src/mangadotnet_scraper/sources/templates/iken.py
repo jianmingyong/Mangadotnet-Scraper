@@ -84,24 +84,12 @@ class IkenTemplate(BaseSourceProvider):
         self.group_name = group_name
 
     @override
-    async def initialize_client(self) -> None:
+    async def _on_initialize(self) -> None:
         if self.headers is None:
             self.headers = {
                 "Origin": self.base_url,
                 "Referer": f"{self.base_url}/",
             }
-
-        await super().initialize_client()
-
-    async def fetch_listing(self, page: int = 1) -> PostsResponse:
-        return await self.client.get_json(
-            "/api/posts",
-            params={
-                "page": page,
-                "perPage": 100,
-                "isNovel": "false",
-            },
-        )
 
     @override
     async def _on_get_manga_list(self) -> AsyncGenerator[Manga]:
@@ -109,7 +97,14 @@ class IkenTemplate(BaseSourceProvider):
         has_next_page = True
 
         while has_next_page:
-            json = await self.fetch_listing(page)
+            json: PostsResponse = await self.get_json(
+                "/api/posts",
+                params={
+                    "page": page,
+                    "perPage": 100,
+                    "isNovel": "false",
+                },
+            )
 
             for post in dict_get_recursive(json, "posts", default=[]):
                 id: int | None = dict_get_recursive(post, "id")
@@ -140,7 +135,7 @@ class IkenTemplate(BaseSourceProvider):
         new_manga = manga.copy()
 
         if need_details:
-            json: PostResponse = await self.client.get_json(
+            json: PostResponse = await self.get_json(
                 "/api/post", params={"postId": manga.id}
             )
 
@@ -160,7 +155,7 @@ class IkenTemplate(BaseSourceProvider):
 
         if need_chapters:
             chapters = []
-            chapters_json: ChaptersResponse = await self.client.get_json(
+            chapters_json: ChaptersResponse = await self.get_json(
                 "/api/chapters", params={"postId": manga.id}
             )
 
@@ -206,7 +201,7 @@ class IkenTemplate(BaseSourceProvider):
         self, manga: Manga, chapter: Chapter
     ) -> Sequence[Page]:
         manga_pages = []
-        pages: ChapterResponse = await self.client.get_json(
+        pages: ChapterResponse = await self.get_json(
             "/api/chapter", params={"chapterId": chapter.id}
         )
 
@@ -222,5 +217,7 @@ class IkenTemplate(BaseSourceProvider):
         return manga_pages
 
     @override
-    async def _on_get_image_request(self, page: Page) -> ImageRequest:
-        return ImageRequest(headers={"Referer": f"{self.base_url}/"})
+    def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(
+            url=page.link, headers={"Referer": f"{self.base_url}/"}
+        )

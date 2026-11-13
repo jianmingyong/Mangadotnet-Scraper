@@ -5,13 +5,18 @@ from typing import Any, Final, Unpack, cast, override
 from bs4 import BeautifulSoup, Tag
 
 from mangadotnet_scraper.config import Config
-from mangadotnet_scraper.network import HttpResponseError
+from mangadotnet_scraper.network import (
+    HttpResponseError,
+    Response,
+    retryable_client_method,
+)
 from mangadotnet_scraper.sources.base import (
     BaseSourceProvider,
     Chapter,
     ImageRequest,
     Manga,
     Page,
+    SourceError,
     SourceInfo,
 )
 from mangadotnet_scraper.utilities import clean_chapter_title, normalize_url
@@ -33,9 +38,6 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
         self.group_name = group_name
         self.base_cdn_url = base_cdn_url
 
-    async def fetch_listing_html(self, page: int = 1) -> str:
-        return await self.client.get_text("/latest", params={"page": page})
-
     def is_chapter_link_element(self, tag: Tag) -> bool:
         return (
             tag.name == "a"
@@ -45,10 +47,13 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
             and tag.find_parent("div", attrs={"id": "chapters"}) is not None
         )
 
+    @retryable_client_method
     async def test_page_response(self, link: str) -> bool:
         try:
-            await self.client.head(link)
-            return True
+            async with await self.client.head(link) as response:
+                response: Response
+                response.raise_for_status()
+                return True
         except HttpResponseError as error:
             if error.status == 404:
                 return False
@@ -61,7 +66,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
         has_next_page = True
 
         while has_next_page:
-            html = await self.fetch_listing_html(page)
+            html = await self.get_html("/latest", params={"page": page})
             soup = BeautifulSoup(html, "html.parser")
 
             elements = soup.find_all(
@@ -98,23 +103,23 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
     ) -> Manga:
         new_manga = manga.copy()
 
-        html = await self.client.get_text(manga.link)
+        html = await self.get_html(manga.link)
         soup = BeautifulSoup(html, "html.parser")
 
         if need_details:
             title_element = soup.find("h1")
-            new_manga.title = (
-                title_element.get_text(strip=True)
-                if title_element
-                else new_manga.title
-            )
 
-            alt_titles_element = soup.find_all(
+            if title_element is None:
+                raise SourceError("Title does not exists")
+
+            new_manga.title = title_element.get_text(strip=True)
+
+            alt_titles_elements = soup.find_all(
                 "li", attrs={"class": "select-all"}
             )
             new_manga.alt_titles = (
-                [e.get_text(strip=True) for e in alt_titles_element]
-                if alt_titles_element
+                [e.get_text(strip=True) for e in alt_titles_elements]
+                if alt_titles_elements
                 else new_manga.alt_titles
             )
 
@@ -126,21 +131,21 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                 chapter_title = cast(str | None, chapter_element.get("title"))
 
                 if chapter_title is None:
-                    continue
+                    raise SourceError("Unable to get chapter title")
 
                 title_match = re.search(
                     "Chapter (\\d+\\.\\d+|\\d+)", chapter_title
                 )
 
                 if title_match is None:
-                    continue
+                    raise SourceError("Unable to get chapter number")
                 else:
                     chapter_number = float(title_match[1])
 
                 chapter_link = cast(str | None, chapter_element.get("href"))
 
                 if chapter_link is None:
-                    continue
+                    raise SourceError("Unable to get chapter link")
 
                 chapters.append(
                     Chapter(
@@ -163,7 +168,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
     async def _on_get_page_list(
         self, manga: Manga, chapter: Chapter
     ) -> Sequence[Page]:
-        html = await self.client.get_text(chapter.link)
+        html = await self.get_html(chapter.link)
         soup = BeautifulSoup(html, "html.parser")
 
         pages = []
@@ -173,7 +178,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
         )
 
         if x_data_element is None:
-            return pages
+            raise SourceError("Unable to find x-data")
 
         x_data = cast(str, x_data_element.get("x-data", default="{}"))
 
@@ -192,23 +197,24 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
             image_base_url = x_data_json.get("baseLink", self.base_cdn_url)
 
             if not isinstance(image_base_url, str):
-                return pages
+                raise SourceError("Invalid image base url")
 
             image_pages = x_data_json.get("pages", [])
 
             if not isinstance(image_pages, Sequence):
-                return pages
+                raise SourceError("Invalid page data")
 
             if len(image_pages) == 0:
                 # This is a premium chapter, we can't actually get the data here so we might as well guess?
                 page = 1
 
                 revision_element = soup.find("meta", {"property": "og:image"})
+                revision_id = None
 
-                if revision_element is None:
-                    return pages
-
-                revision_id = cast(str | None, revision_element.get("content"))
+                if revision_element is not None:
+                    revision_id = cast(
+                        str | None, revision_element.get("content")
+                    )
 
                 if (
                     revision_id is not None
@@ -235,17 +241,22 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                 # Free Chapter
                 for idx, image in enumerate(image_pages):
                     if isinstance(image, Mapping):
+                        image_link = image.get("path")
+
+                        if image_link is None:
+                            raise SourceError("Invalid image link")
+
                         pages.append(
                             Page(
-                                idx,
-                                normalize_url(
-                                    image.get("path", ""), image_base_url
-                                ),
+                                page=idx,
+                                link=normalize_url(image_link, image_base_url),
                             )
                         )
 
         return pages
 
     @override
-    async def _on_get_image_request(self, page: Page) -> ImageRequest:
-        return ImageRequest(headers={"Referer": f"{self.base_url}/"})
+    def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(
+            url=page.link, headers={"Referer": f"{self.base_url}/"}
+        )

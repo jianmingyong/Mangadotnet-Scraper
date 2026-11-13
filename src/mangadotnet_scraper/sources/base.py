@@ -12,6 +12,7 @@ from typing import (
     TypedDict,
     Unpack,
     cast,
+    final,
     override,
 )
 
@@ -21,7 +22,12 @@ from playwright.async_api import Browser, Error
 
 from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import Config
-from mangadotnet_scraper.network import HttpClient
+from mangadotnet_scraper.network import (
+    HttpClient,
+    Response,
+    create_http_client,
+    retryable_client_method,
+)
 from mangadotnet_scraper.utilities import clean_string, normalize_url
 
 
@@ -76,6 +82,7 @@ class Page:
 
 @dataclass(frozen=True)
 class ImageRequest:
+    url: str
     cookies: Mapping[str, str] | None = None
     headers: Mapping[str, str] | None = None
 
@@ -169,6 +176,7 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         # pyrefly: ignore [missing-argument]
         return cls(config)
 
+    @final
     async def initialize(self) -> None:
         self.settings = self.config.get_source_config(self.source_id)
         self.base_url = self.settings.get("base_url", self.base_urls[0])
@@ -178,22 +186,22 @@ class BaseSourceProvider(AbstractAsyncContextManager):
                 "base_api_url", self.base_api_urls[0]
             )
 
-        await self.initialize_client()
+        await self._on_initialize()
 
-        self._camoufox = None
-        self._browser = None
-
-    async def initialize_client(self) -> None:
         base_url = (
             self.base_api_url
             if self.base_api_url is not None
             else self.base_url
         )
 
-        self.client = HttpClient(
+        self.client = create_http_client(
             base_url, self.user_agent, self.headers, self.cookies, self.limiter
         )
 
+        self._camoufox = None
+        self._browser = None
+
+    @final
     async def get_browser(self) -> Browser:
         if self._camoufox is None and self._browser is None:
             try:
@@ -206,6 +214,26 @@ class BaseSourceProvider(AbstractAsyncContextManager):
                 raise
 
         return cast(Browser, self._browser)
+
+    @final
+    @retryable_client_method
+    async def get_html(
+        self, url: str, params: Mapping[str, Any] | None = None, **kwargs
+    ) -> str:
+        async with await self.client.get(url, params, **kwargs) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.text()
+
+    @final
+    @retryable_client_method
+    async def get_json(
+        self, url: str, params: Mapping[str, Any] | None = None, **kwargs
+    ) -> Any:
+        async with await self.client.get(url, params, **kwargs) as response:
+            response: Response
+            response.raise_for_status()
+            return await response.json()
 
     async def close(self) -> None:
         if self.limiter is not None:
@@ -222,6 +250,7 @@ class BaseSourceProvider(AbstractAsyncContextManager):
             await self._camoufox.__aexit__()
             self._camoufox = None
 
+    @final
     async def get_manga_list(self) -> AsyncGenerator[Manga]:
         try:
             async for list in self._on_get_manga_list():
@@ -234,6 +263,7 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         except Exception as error:
             raise SourceError("Error fetching manga list") from error
 
+    @final
     async def get_manga_update(
         self,
         manga: Manga,
@@ -261,8 +291,11 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         except Exception as error:
             raise SourceError("Error fetching manga update") from error
 
+    @final
     async def get_page_list(
-        self, manga: Manga, chapter: Chapter
+        self,
+        manga: Manga,
+        chapter: Chapter,
     ) -> Sequence[Page]:
         try:
             pages = await self._on_get_page_list(manga, chapter)
@@ -280,23 +313,29 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         except Exception as error:
             raise SourceError("Error fetching page list") from error
 
-    async def get_image_request(self, page: Page) -> ImageRequest:
+    @final
+    def get_image_request(self, page: Page) -> ImageRequest:
         try:
-            return await self._on_get_image_request(page)
+            return self._on_get_image_request(page)
         except Exception as error:
             raise SourceError("Error fetching image request") from error
 
+    @final
     async def process_page_image(self, image: bytes, page: Page) -> bytes:
         try:
             return await self._on_process_page_image(image, page)
         except Exception as error:
             raise SourceError("Error processing page image") from error
 
+    @final
     async def handle_manga_migration(self, manga: Manga) -> Manga:
         try:
             return await self._on_handle_manga_migration(manga)
         except Exception as error:
             raise SourceError("Error handling manga migration") from error
+
+    async def _on_initialize(self) -> None:
+        pass
 
     @abstractmethod
     def _on_get_manga_list(self) -> AsyncGenerator[Manga]: ...
@@ -311,11 +350,13 @@ class BaseSourceProvider(AbstractAsyncContextManager):
 
     @abstractmethod
     async def _on_get_page_list(
-        self, manga: Manga, chapter: Chapter
+        self,
+        manga: Manga,
+        chapter: Chapter,
     ) -> Sequence[Page]: ...
 
-    async def _on_get_image_request(self, page: Page) -> ImageRequest:
-        return ImageRequest()
+    def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(page.link)
 
     async def _on_process_page_image(self, image: bytes, page: Page) -> bytes:
         return image

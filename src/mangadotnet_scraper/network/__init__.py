@@ -1,15 +1,12 @@
 import logging
 from asyncio import sleep
 from collections.abc import Callable, Coroutine, Mapping
-from contextlib import AbstractAsyncContextManager
 from functools import wraps
 from typing import Any, Final
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
-from mangadotnet_scraper.network.base import HttpResponseError, Response
-
-from .base import BaseHttpClientProvider
+from .base import BaseHttpClientProvider, HttpResponseError, Response
 from .providers import AioHttpClientProvider
 
 
@@ -62,23 +59,26 @@ def retryable_client_method[**P, R](
     return wrapper
 
 
-class HttpClient(AbstractAsyncContextManager):
+def create_http_client(
+    base_url: str | None = None,
+    user_agent: str | None = None,
+    headers: Mapping[str, str] | None = None,
+    cookies: Mapping[str, str] | None = None,
+    limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
+    **kwargs,
+) -> HttpClient:
+    return HttpClient(
+        AioHttpClientProvider(
+            base_url, user_agent, headers, cookies, limiter, **kwargs
+        )
+    )
+
+
+class HttpClient(BaseHttpClientProvider):
     _provider: Final[BaseHttpClientProvider]
 
-    def __init__(
-        self,
-        base_url: str | None = None,
-        user_agent: str | None = None,
-        headers: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
-    ) -> None:
-        self._provider = AioHttpClientProvider(
-            base_url, user_agent, headers, cookies, limiter
-        )
-
-    async def __aexit__(self, *args) -> None:
-        await self._provider.close()
+    def __init__(self, provider: BaseHttpClientProvider) -> None:
+        self._provider = provider
 
     async def close(self) -> None:
         await self._provider.close()
@@ -216,4 +216,10 @@ class HttpClient(AbstractAsyncContextManager):
         )
 
 
-__all__ = ["HttpClient"]
+__all__ = [
+    "HttpClient",
+    "HttpResponseError",
+    "Response",
+    "create_http_client",
+    "retryable_client_method",
+]

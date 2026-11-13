@@ -2,6 +2,7 @@ import logging
 from abc import ABC
 from asyncio import Lock, sleep
 from collections.abc import Mapping
+from time import time
 from typing import Any, Final, override
 
 from aiohttp import (
@@ -171,10 +172,21 @@ class RateLimitedMiddleware(Middleware):
 
             retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
 
+            # Common Rate limit headers
+            if retry_timer is None:
+                retry_timer = response.headers.get("X-RateLimit-Reset")
+
+            # Common Rate limit headers
+            if retry_timer is None:
+                retry_timer = response.headers.get("RateLimit-Reset")
+
             if retry_timer is not None and retry_timer.isnumeric():
                 retry_timer = int(retry_timer)
             else:
                 retry_timer = self._retry_wait_duration
+
+            if retry_timer > time():
+                retry_timer -= int(time())
 
             logging.getLogger(__name__).error(
                 f"Request rate limited. Retrying after {retry_timer} seconds..."
