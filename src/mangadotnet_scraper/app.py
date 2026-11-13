@@ -1,3 +1,5 @@
+import logging
+from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import (
     Final,
@@ -7,11 +9,12 @@ from typing import (
 import questionary
 from questionary import Choice
 from rich import get_console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 import mangadotnet_scraper.sources.providers  # noqa: F401
 from mangadotnet_scraper.data import Data
 from mangadotnet_scraper.data.providers import SqliteDataProvider
-from mangadotnet_scraper.sources import SourceProvider
+from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 
 from .config import Config
 from .config.providers import JsonConfigProvider
@@ -43,6 +46,15 @@ class App(AbstractAsyncContextManager):
 
         await self.show_main_menu()
 
+    def generate_choices(self, text: str) -> Sequence[Choice]:
+        return [
+            Choice(
+                f"{text} {source.name} [{','.join(source.languages)}]",
+                source.source_id,
+            )
+            for source in self.sources.get_enabled_sources()
+        ]
+
     async def show_main_menu(self) -> None:
         while True:
             selection = await questionary.select(
@@ -64,11 +76,68 @@ class App(AbstractAsyncContextManager):
             ).ask_async()
 
             match selection:
+                case 1:
+                    selection = await questionary.select(
+                        "Which Source(s) to Fetch Listing",
+                        choices=[
+                            Choice("All", -1),
+                            *self.generate_choices("Fetch"),
+                            Choice("Back", -2),
+                        ],
+                    ).ask_async()
+
+                    if selection is None or selection == -2:
+                        continue
+                    elif selection == -1:
+                        for source in self.sources.get_enabled_sources():
+                            async with source:
+                                await self.fetch_source_listing(source)
+                    else:
+                        async with self.sources.get_source(
+                            selection
+                        ) as source:
+                            await self.fetch_source_listing(source)
+
                 case 6:
                     await self.show_settings_menu()
 
                 case _:
                     break
+
+    async def fetch_source_listing(self, source: BaseSourceProvider) -> None:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("Fetching {task.description} Listing"),
+            transient=True,
+        ) as progress:
+            progress.add_task(source.name, total=None)
+
+            try:
+                async for manga in source.get_manga_list():
+                    progress.print(
+                        "Adding:",
+                        manga.title,
+                        markup=False,
+                        highlight=False,
+                    )
+                    self.data.add_source_entry(
+                        source.source_id, manga.id, manga.title, manga.link
+                    )
+
+                progress.print(
+                    f"Done fetching {source.name} Listing",
+                    markup=False,
+                    highlight=False,
+                )
+            except Exception:
+                progress.print(
+                    f"Error fetching {source.name} Listing",
+                    markup=False,
+                    highlight=False,
+                )
+                logging.getLogger(__name__).exception(
+                    f"Error fetching {source.name} Listing"
+                )
 
     async def show_settings_menu(self) -> None:
         while True:
@@ -76,7 +145,6 @@ class App(AbstractAsyncContextManager):
                 "What would you like to do?",
                 choices=[
                     Choice("Configure Sources", 1),
-                    Choice("Configure MangaDotNet Account", 2),
                     Choice("Back", -1),
                 ],
                 use_shortcuts=True,
@@ -109,4 +177,4 @@ class App(AbstractAsyncContextManager):
                         self.config.enabled_sources = selection
 
                 case _:
-                    return
+                    break
