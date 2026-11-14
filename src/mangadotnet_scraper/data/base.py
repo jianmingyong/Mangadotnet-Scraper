@@ -42,9 +42,9 @@ class DataProvider(ABC):
     @abstractmethod
     def add_source_entry(
         self, source_id: str, manga_id: str, title: str, link: str
-    ) -> None:
+    ) -> bool:
         """
-        Add a new manga series into source_id. Duplicate manga_id will be rejected.
+        Add a new manga series into source_id.
         """
 
     @abstractmethod

@@ -55,11 +55,12 @@ class SqliteDataProvider(DataProvider):
                     skip_upload             INTEGER NOT NULL DEFAULT 0,
                     chapters                TEXT    DEFAULT NULL,
                     CONSTRAINT source_entry_unique_manga_id UNIQUE (source_id, manga_id)
+                    CONSTRAINT source_entry_unique_link UNIQUE (source_id, link)
                 );
 
                 INSERT OR IGNORE INTO db_version (table_name, version) VALUES 
-                    ("source", 1),
-                    ("source_entry", 1);
+                    ('source', 1),
+                    ('source_entry', 1);
                 """
             )
 
@@ -99,9 +100,9 @@ class SqliteDataProvider(DataProvider):
                         skip_upload 
                     FROM module_manga;
 
-                    DROP TABLE IF EXISTS "module";
-                    DROP TABLE IF EXISTS "module_chapter";
-                    DROP TABLE IF EXISTS "module_manga";
+                    DROP TABLE IF EXISTS module;
+                    DROP TABLE IF EXISTS module_chapter;
+                    DROP TABLE IF EXISTS module_manga;
 
                     DELETE FROM db_version WHERE table_name = 'module' OR table_name = 'module_manga' OR table_name = 'module_chapter';
                     """
@@ -120,19 +121,31 @@ class SqliteDataProvider(DataProvider):
     @override
     def add_source_entry(
         self, source_id: str, manga_id: str, title: str, link: str
-    ) -> None:
+    ) -> bool:
         with self._connection.atomic():
-            self._execute(
+            count: int = self._execute(
                 t"""
-                INSERT INTO source_entry (
-                    source_id,
-                    manga_id,
-                    link,
-                    title
-                ) VALUES ({source_id}, {manga_id}, {link}, {title})
-                ON CONFLICT (source_id, manga_id) DO NOTHING;
+                SELECT COUNT(*)
+                FROM source_entry
+                WHERE source_id = {source_id} AND (manga_id = {manga_id} OR link = {link});
                 """
-            )
+            ).scalar()
+
+            if count == 0:
+                # No duplicate exists, safe to add into the db
+                self._execute(
+                    t"""
+                    INSERT INTO source_entry (
+                        source_id,
+                        manga_id,
+                        link,
+                        title
+                    ) VALUES ({source_id}, {manga_id}, {link}, {title});
+                    """
+                )
+                return True
+            else:
+                return False
 
     @override
     def delete_source_entry(self, id: int) -> None:
