@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.13.8,<0.14"]
+build-backend = "uv_build"
 
 [project]
 name = "mangadotnet-scraper"
@@ -21,21 +21,14 @@ dependencies = [
     "uvloop>=0.23.0; sys_platform == 'linux'",
 ]
 
-[project.optional-dependencies]
+[project.scripts]
+mangadotnet_scraper = "mangadotnet_scraper:initialize"
+
+[dependency-groups]
 dev = [
     "pyrefly>=1.2.0",
     "ruff>=0.16.5"
 ]
-
-camoufox_gui = [
-    "camoufox[gui]>=0.5.5"
-]
-
-[project.scripts]
-mangadotnet_scraper = "mangadotnet_scraper:initialize"
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [tool.pyrefly]
 project-includes = ["src"]
