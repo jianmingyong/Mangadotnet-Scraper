@@ -1,11 +1,13 @@
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
+from math import floor
 from typing import Final, Literal, ReadOnly, TypedDict, override
+
+from asynciolimiter import LeakyBucketLimiter
 
 from mangadotnet_scraper.network import (
     HttpClient,
-    Response,
     create_http_client,
     retryable_client_method,
 )
@@ -32,21 +34,25 @@ class MangaBakaEntryDataTitle(TypedDict):
 
 class MangaBakaApi(AbstractAsyncContextManager):
     _client: Final[HttpClient]
+    _limiter: Final[LeakyBucketLimiter]
 
     def __init__(self) -> None:
-        self._client = create_http_client("https://api.mangabaka.org")
+        self._limiter = LeakyBucketLimiter(0.5, capacity=30)
+        self._client = create_http_client(
+            "https://api.mangabaka.org", limiter=self._limiter
+        )
 
     @override
     async def __aexit__(self, *args) -> None:
         await self.close()
 
     async def close(self) -> None:
+        self._limiter.close()
         await self._client.close()
 
     @retryable_client_method
     async def get_series_by_id(self, id: int) -> MangaBakaEntry:
         async with await self._client.get(f"/v2/series/{id}") as response:
-            response: Response
             response.raise_for_status()
             return await response.json()
 
@@ -61,7 +67,6 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 "schema": "full",
             },
         ) as response:
-            response: Response
             response.raise_for_status()
             return await response.json()
 
@@ -77,7 +82,6 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 "schema": "full",
             },
         ) as response:
-            response: Response
             response.raise_for_status()
             return await response.json()
 
@@ -105,12 +109,15 @@ class MangaBakaApi(AbstractAsyncContextManager):
         async def do_search(title: str) -> None:
             json = await self.search_series_by_title(title)
 
+            match_base = title.casefold()
+
             for data in json.get("data", []):
                 for matched_title in data.get("titles", []):
-                    match_base = title.casefold()
                     match_target = matched_title.get("title", "").casefold()
 
-                    if len(match_target) > 20:
+                    if len(match_target) > 20 and match_target.startswith(
+                        match_base[: floor(len(match_base) * 0.75)]
+                    ):
                         matches.append(data)
                         break
 

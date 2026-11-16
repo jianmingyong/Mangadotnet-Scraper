@@ -24,7 +24,6 @@ from mangadotnet_scraper.camoufox_utils import create_browser
 from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
     HttpClient,
-    Response,
     create_http_client,
     retryable_client_method,
 )
@@ -221,7 +220,6 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         self, url: str, params: Mapping[str, Any] | None = None, **kwargs
     ) -> str:
         async with await self.client.get(url, params, **kwargs) as response:
-            response: Response
             response.raise_for_status()
             return await response.text()
 
@@ -231,7 +229,6 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         self, url: str, params: Mapping[str, Any] | None = None, **kwargs
     ) -> Any:
         async with await self.client.get(url, params, **kwargs) as response:
-            response: Response
             response.raise_for_status()
             return await response.json()
 

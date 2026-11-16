@@ -29,7 +29,7 @@ class SourceProvider:
     def register_source(cls, provider: type[BaseSourceProvider]) -> None:
         cls._provider.append(provider)
 
-    def prepare(self):
+    def prepare(self) -> None:
         for provider in self._provider:
             obj = provider.create_provider(self._config)
             self._created_provider[obj.source_id] = obj

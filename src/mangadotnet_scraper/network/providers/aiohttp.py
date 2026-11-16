@@ -26,7 +26,7 @@ from mangadotnet_scraper.network.base import (
 
 
 class AioClientResponse(Response):
-    _response: ClientResponse
+    _response: Final[ClientResponse]
 
     def __init__(self, response: ClientResponse) -> None:
         super().__init__(
@@ -41,18 +41,21 @@ class AioClientResponse(Response):
         )
         self._response = response
 
+    @override
     async def read(self) -> bytes:
         try:
             return await self._response.read()
         except ClientPayloadError as error:
             raise OSError() from error
 
+    @override
     async def text(self, encoding: str | None = None) -> str:
         try:
             return await self._response.text(encoding)
         except ClientPayloadError as error:
             raise OSError() from error
 
+    @override
     async def json(self, encoding: str | None = None) -> Any:
         try:
             return await self._response.json(
@@ -61,6 +64,7 @@ class AioClientResponse(Response):
         except ClientPayloadError as error:
             raise OSError() from error
 
+    @override
     async def close(self) -> None:
         self._response.close()
 
@@ -129,8 +133,8 @@ class CloudflareMiddleware(Middleware):
             if response.headers.get("cf-mitigated") != "challenge":
                 return response
 
-            logging.getLogger(__name__).error(
-                "Request requires cloudflare challenge. Attempting to get cloudflare cookies..."
+            logging.getLogger(__name__).warning(
+                "Response returned cloudflare challenge. Attempting to get cloudflare cookies."
             )
 
             data = await get_cloudflare_cookies(
@@ -188,8 +192,10 @@ class RateLimitedMiddleware(Middleware):
             if retry_timer > time():
                 retry_timer -= int(time())
 
-            logging.getLogger(__name__).error(
-                f"Request rate limited. Retrying after {retry_timer} seconds..."
+            logging.getLogger(__name__).warning(
+                "Request rate limited (%s) Retrying after %s seconds.",
+                str(request.request_info.url),
+                retry_timer,
             )
 
             await sleep(retry_timer)
@@ -222,17 +228,23 @@ class AioHttpClientProvider(BaseHttpClientProvider):
 
         timeout = ClientTimeout(total=60, sock_connect=30)
 
+        middlewares = [
+            RateLimitedMiddleware(),
+            CloudflareMiddleware(user_agent),
+            RateLimitMiddleware(limiter),
+        ]
+
+        if kwargs.get("middlewares") is not None:
+            middlewares = kwargs.get("middlewares")
+            del kwargs["middlewares"]
+
         self._client = ClientSession(
             base_url=base_url,
             connector=connector,
             cookies=cookies,
             headers=_headers,
             timeout=timeout,
-            middlewares=[
-                RateLimitedMiddleware(),
-                CloudflareMiddleware(user_agent),
-                RateLimitMiddleware(limiter),
-            ],
+            middlewares=middlewares,
             **kwargs,
         )
 

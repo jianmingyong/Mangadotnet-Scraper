@@ -301,47 +301,6 @@ async def initialize_async() -> None:
                 config.save()
 
 
-async def fetch_module_listing(
-    module: BaseModule, data: MangaDotNetScraperData
-) -> None:
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("Fetching {task.description} Listing"),
-        transient=True,
-    ) as progress:
-        progress.add_task(module.display_name, total=None)
-
-        try:
-            async for listing in module.fetch_manga_listing():
-                progress.print(
-                    "Adding:",
-                    listing.title,
-                    markup=False,
-                    highlight=False,
-                )
-                data.add_module_listing(
-                    module.module_id,
-                    listing.manga_id,
-                    listing.title,
-                    listing.link,
-                )
-
-            progress.print(
-                f"Done fetching {module.display_name} Listing",
-                markup=False,
-                highlight=False,
-            )
-        except Exception:
-            progress.print(
-                f"Error fetching {module.display_name} Listing",
-                markup=False,
-                highlight=False,
-            )
-            logging.getLogger(__name__).exception(
-                f"Error fetching {module.display_name} Listing"
-            )
-
-
 async def fetch_module_listing_details(
     module: BaseModule,
     data: MangaDotNetScraperData,

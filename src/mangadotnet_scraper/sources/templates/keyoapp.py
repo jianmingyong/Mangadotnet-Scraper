@@ -7,7 +7,6 @@ from bs4 import BeautifulSoup, Tag
 from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
     HttpResponseError,
-    Response,
     retryable_client_method,
 )
 from mangadotnet_scraper.sources.base import (
@@ -51,7 +50,6 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
     async def test_page_response(self, link: str) -> bool:
         try:
             async with await self.client.head(link) as response:
-                response: Response
                 response.raise_for_status()
                 return True
         except HttpResponseError as error:

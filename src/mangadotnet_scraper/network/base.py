@@ -2,7 +2,7 @@ from abc import abstractmethod
 from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Any, Final, override
+from typing import Any, Final, Self, override
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,10 @@ class Response(AbstractAsyncContextManager):
         self.status = status
         self.headers = headers
         self.reason = reason
+
+    @override
+    async def __aenter__(self) -> Self:
+        return self
 
     @override
     async def __aexit__(self, *args) -> None:
@@ -85,6 +89,10 @@ class HttpResponseError(Exception):
 
 
 class BaseHttpClientProvider(AbstractAsyncContextManager):
+    @override
+    async def __aenter__(self) -> Self:
+        return self
+
     @override
     async def __aexit__(self, *args) -> None:
         await self.close()

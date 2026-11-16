@@ -3,7 +3,7 @@ from collections.abc import Collection, Sequence
 from string.templatelib import Interpolation, Template, convert
 from typing import Final, Literal, cast, override
 
-from cysqlite import Connection, Cursor, Row
+from cysqlite import Connection, Cursor, Row, UniqueIntegrityError
 from cysqlite import connect as cysqlite_connect
 
 from mangadotnet_scraper.data.base import (
@@ -122,17 +122,8 @@ class SqliteDataProvider(DataProvider):
     def add_source_entry(
         self, source_id: str, manga_id: str, title: str, link: str
     ) -> bool:
-        with self._connection.atomic():
-            count: int = self._execute(
-                t"""
-                SELECT COUNT(*)
-                FROM source_entry
-                WHERE source_id = {source_id} AND (manga_id = {manga_id} OR link = {link});
-                """
-            ).scalar()
-
-            if count == 0:
-                # No duplicate exists, safe to add into the db
+        try:
+            with self._connection.atomic():
                 self._execute(
                     t"""
                     INSERT INTO source_entry (
@@ -143,9 +134,9 @@ class SqliteDataProvider(DataProvider):
                     ) VALUES ({source_id}, {manga_id}, {link}, {title});
                     """
                 )
-                return True
-            else:
-                return False
+            return True
+        except UniqueIntegrityError:
+            return False
 
     @override
     def delete_source_entry(self, id: int) -> None:
@@ -179,7 +170,7 @@ class SqliteDataProvider(DataProvider):
             WHERE
                 source_id = {source_id} AND
                 rowid > {offset}
-            ORDER BY {order_by} {order:l}
+            ORDER BY {order_by:l} {order:l}
             ;
             """
         )
