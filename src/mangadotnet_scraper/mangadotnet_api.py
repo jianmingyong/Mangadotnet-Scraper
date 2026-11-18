@@ -371,7 +371,7 @@ class MangaDotNetLoginMiddleware(Middleware):
                             ),
                         )
 
-                        await input.type(otp)
+                        await input.fill(otp)
 
                         submit_button = page.get_by_text("Verify", exact=True)
 
@@ -383,26 +383,34 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                         await submit_button.click()
 
-                        await sleep(5)
+                        async def check_for_alert() -> None:
+                            alert = page.locator('div[role="alert"]')
 
-                        if await submit_button.count() > 0:
+                            while await alert.count() == 0:
+                                await sleep(1)
+
+                        async def check_for_logged_in() -> None:
+                            locator = page.locator("#aal2-totp")
+
+                            while await locator.count() > 0:
+                                await sleep(1)
+
+                        task = create_task(check_for_alert())
+                        task2 = create_task(check_for_logged_in())
+
+                        await wait(
+                            [task, task2], return_when=asyncio.FIRST_COMPLETED
+                        )
+
+                        if task.done():
+                            task2.cancel()
                             continue
-                        else:
+
+                        if task2.done():
+                            task.cancel()
                             break
                     else:
                         break
-
-                try:
-                    await page.wait_for_url(
-                        self._api._BASE_URL,
-                        wait_until="domcontentloaded",
-                    )
-                except TimeoutError:
-                    # login fail because of something...
-                    logging.getLogger(__name__).error(
-                        "Mangadotnet username or password are invalid"
-                    )
-                    return None
 
                 cookies = await context.cookies(self._api._BASE_URL)
 
@@ -528,9 +536,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     @retryable_client_method
     async def get_user_profile(self) -> MangaDotNetProfile:
-        async with await self._client.get(
-            "/api/profile", timeout=None
-        ) as response:
+        async with await self._client.get("/api/profile") as response:
             response.raise_for_status()
             return await response.json()
 
