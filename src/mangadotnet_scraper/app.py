@@ -5,6 +5,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import (
     Final,
     Self,
+    cast,
     override,
 )
 
@@ -32,6 +33,7 @@ from mangadotnet_scraper.mangadotnet_api import (
     MangaDotNetApi,
     MangaDotNetLoginRequestHandler,
 )
+from mangadotnet_scraper.network import HttpResponseError
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 from mangadotnet_scraper.sources.base import Chapter
 
@@ -39,29 +41,33 @@ from .config.providers import JsonConfigProvider
 
 
 class LoginHandler(MangaDotNetLoginRequestHandler):
-    async def request_credentials(self) -> tuple[str, str]:
-        username = None
-        password = None
+    _progress: Final[Progress]
 
-        while username is None or len(username) == 0:
-            username = await questionary.text(
-                "Please enter MangaDotNet Username:"
-            ).ask_async()
+    def __init__(self, progress: Progress) -> None:
+        self._progress = progress
 
-        while password is None or len(password) == 0:
-            password = await questionary.password(
-                "Please enter MangaDotNet password:"
-            ).ask_async()
+    @override
+    async def request_credentials(self) -> tuple[str | None, str | None]:
+        self._progress.stop()
+
+        username = await questionary.text(
+            "Please enter MangaDotNet Username:"
+        ).ask_async()
+
+        password = await questionary.password(
+            "Please enter MangaDotNet Password:"
+        ).ask_async()
 
         return username, password
 
-    async def request_otp(self) -> str:
-        otp = None
+    @override
+    async def request_otp(self) -> str | None:
+        self._progress.stop()
 
-        while otp is None or len(otp) == 0:
-            otp = await questionary.text(
-                "Please enter MangaDotNet OTP:"
-            ).ask_async()
+        otp = await questionary.text(
+            "Please enter MangaDotNet OTP (6 digits):",
+            validate=lambda x: len(x) == 6 and cast(str, x).isdigit(),
+        ).ask_async()
 
         return otp
 
@@ -79,7 +85,7 @@ class App(AbstractAsyncContextManager):
         self.data = SqliteDataProvider()
         self.sources = SourceProvider(self.config)
         self.mangabaka_api = MangaBakaApi()
-        self.mangadotnet_api = MangaDotNetApi(self.config, LoginHandler())
+        self.mangadotnet_api = MangaDotNetApi(self.config)
 
     @override
     async def __aenter__(self) -> Self:
@@ -101,7 +107,26 @@ class App(AbstractAsyncContextManager):
         self.config.load()
         self.data.initialize()
 
-        await self.mangadotnet_api.get_user_profile()
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("Checking MangaDotNet Account"),
+            transient=True,
+        ) as progress:
+            progress.add_task("", total=None)
+
+            while True:
+                try:
+                    await self.mangadotnet_api.get_user_profile()
+                    break
+                except HttpResponseError:
+                    # User not logged in.
+                    if not await self.mangadotnet_api.login(
+                        LoginHandler(progress)
+                    ):
+                        continue
+
+                    progress.start()
+
         await self.show_main_menu()
 
     def generate_choices(self, text: str) -> Sequence[Choice]:

@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from asyncio import Lock, create_task, sleep, wait
+from asyncio import create_task, sleep, wait
 from base64 import b64encode
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
@@ -189,33 +189,22 @@ class MangaDotNetTusCapabilities:
 
 class MangaDotNetLoginRequestHandler(ABC):
     @abstractmethod
-    async def request_credentials(self) -> tuple[str, str]: ...
+    async def request_credentials(self) -> tuple[str | None, str | None]: ...
 
     @abstractmethod
-    async def request_otp(self) -> str: ...
+    async def request_otp(self) -> str | None: ...
 
 
 class MangaDotNetLoginMiddleware(Middleware):
-    _UNAUTHORIZED_STATUS_CODE = 401
     _AUTHENTICATION_COOKIE = "ory_kratos_session"
-    _CLOUDFLARE_COOKIE_NAME = "cf_clearance"
 
     _config: Final[ConfigProvider]
-    _api: Final[MangaDotNetApi]
-    _handler: Final[MangaDotNetLoginRequestHandler]
-
-    _lock: Final[Lock]
 
     def __init__(
         self,
         config: ConfigProvider,
-        api: MangaDotNetApi,
-        handler: MangaDotNetLoginRequestHandler,
     ) -> None:
         self._config = config
-        self._api = api
-        self._handler = handler
-        self._lock = Lock()
 
     @property
     def user_session_cookie(self) -> str | None:
@@ -235,204 +224,14 @@ class MangaDotNetLoginMiddleware(Middleware):
                 )
             return await handler(request)
 
-        response = await update_cookies_and_request()
-
-        if response.status == 401:
-            async with self._lock:
-                response = await update_cookies_and_request()
-
-                if response.status != 401:
-                    return response
-
-                self.user_session_cookie = await self.handle_authentication()
-                return await update_cookies_and_request()
-
-        return response
-
-    async def handle_authentication(self) -> str | None:
-        try:
-            async with (
-                create_browser(False) as browser,
-                await cast(Browser, browser).new_context() as context,
-                await context.new_page() as page,
-                ClickSolver(
-                    framework=FrameworkType.CAMOUFOX, page=page
-                ) as solver,
-            ):
-                response = cast(
-                    PlaywrightResponse,
-                    await page.goto(f"{self._api._BASE_URL}/login"),
-                )
-
-                if not await solve_cloudflare_captcha_interstitial(
-                    solver, page, response
-                ):
-                    logging.getLogger(__name__).error(
-                        "[Camoufox] Failed to solve cloudflare captcha"
-                    )
-                    return None
-
-                # Prevent ads from redirecting this page.
-                await page.evaluate(
-                    "localStorage.setItem('lastPopAt', Date.now());"
-                )
-
-                while True:
-                    username_element = page.locator("#identifier")
-                    password_element = page.locator("#password")
-
-                    try:
-                        await username_element.wait_for(
-                            timeout=5000, state="attached"
-                        )
-                        await password_element.wait_for(
-                            timeout=5000, state="attached"
-                        )
-                    except TimeoutError:
-                        logging.getLogger(__name__).error(
-                            "Unable to find username/password field"
-                        )
-                        return None
-
-                    (
-                        username,
-                        password,
-                    ) = await self._handler.request_credentials()
-
-                    try:
-                        await username_element.fill(username, timeout=5000)
-                        await password_element.fill(password, timeout=5000)
-                    except TimeoutError:
-                        logging.getLogger(__name__).error(
-                            "Unable to find username/password field"
-                        )
-                        return None
-
-                    if not await solve_cloudflare_captcha_turnstile(
-                        solver,
-                        page,
-                        'form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
-                    ):
-                        logging.getLogger(__name__).error(
-                            "[Camoufox] Failed to solve cloudflare captcha"
-                        )
-                        return None
-
-                    submit_button = page.get_by_text("Log in", exact=True)
-
-                    if await submit_button.count() == 0:
-                        logging.getLogger(__name__).error(
-                            "[Camoufox] Log in button not found"
-                        )
-                        return None
-
-                    await submit_button.click()
-
-                    async def check_for_alert() -> None:
-                        alert = page.locator('div[role="alert"]')
-
-                        while await alert.count() == 0:
-                            await sleep(1)
-
-                    async def check_for_logged_in() -> None:
-                        username_element = page.locator("#identifier")
-
-                        while await username_element.count() > 0:
-                            await sleep(1)
-
-                    task = create_task(check_for_alert())
-                    task2 = create_task(check_for_logged_in())
-
-                    await wait(
-                        [task, task2], return_when=asyncio.FIRST_COMPLETED
-                    )
-
-                    if task.done():
-                        task2.cancel()
-                        await page.reload()
-                        continue
-
-                    if task2.done():
-                        task.cancel()
-                        break
-
-                while True:
-                    second_factor_header = page.get_by_text(
-                        "Confirm your second factor"
-                    )
-
-                    if await second_factor_header.count() >= 1:
-                        otp = await self._handler.request_otp()
-
-                        input = cast(
-                            ElementHandle,
-                            await page.wait_for_selector(
-                                "#aal2-totp", strict=True
-                            ),
-                        )
-
-                        await input.fill(otp)
-
-                        submit_button = page.get_by_text("Verify", exact=True)
-
-                        if await submit_button.count() == 0:
-                            logging.getLogger(__name__).error(
-                                "Verify button not found"
-                            )
-                            return None
-
-                        await submit_button.click()
-
-                        async def check_for_alert() -> None:
-                            alert = page.locator('div[role="alert"]')
-
-                            while await alert.count() == 0:
-                                await sleep(1)
-
-                        async def check_for_logged_in() -> None:
-                            locator = page.locator("#aal2-totp")
-
-                            while await locator.count() > 0:
-                                await sleep(1)
-
-                        task = create_task(check_for_alert())
-                        task2 = create_task(check_for_logged_in())
-
-                        await wait(
-                            [task, task2], return_when=asyncio.FIRST_COMPLETED
-                        )
-
-                        if task.done():
-                            task2.cancel()
-                            continue
-
-                        if task2.done():
-                            task.cancel()
-                            break
-                    else:
-                        break
-
-                cookies = await context.cookies(self._api._BASE_URL)
-
-                for cookie in cookies:
-                    if cookie.get("name") == self._AUTHENTICATION_COOKIE:
-                        return cookie.get("value")
-
-                logging.getLogger(__name__).error(
-                    "[Camoufox] Unable to find the authentication cookie"
-                )
-                return None
-        except Error:
-            logging.getLogger(__name__).exception(
-                "[Camoufox] Failed to authenticate due to camoufox error"
-            )
-            return None
+        return await update_cookies_and_request()
 
 
 class MangaDotNetApi(AbstractAsyncContextManager):
-    _BASE_URL: str = "https://mangadot.net"
-    _TUS_VERSION: str = "1.0.0"
-    _TUS_MAX_UPLOAD_SIZE: int = 900 * 1024 * 1024
+    _BASE_URL = "https://mangadot.net"
+    _AUTHENTICATION_COOKIE = "ory_kratos_session"
+    _TUS_VERSION = "1.0.0"
+    _TUS_MAX_UPLOAD_SIZE = 900 * 1024 * 1024
 
     _NON_RESUMABLE_ERROR: Final[Sequence[int]] = [
         400,
@@ -509,7 +308,6 @@ class MangaDotNetApi(AbstractAsyncContextManager):
     def __init__(
         self,
         config: ConfigProvider,
-        loginHandler: MangaDotNetLoginRequestHandler,
     ) -> None:
         self._config = config
         self._client = create_http_client(
@@ -518,7 +316,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 UserRateLimitMiddleware(),
                 ServerRateLimitMiddleware(),
                 RateLimitedMiddleware(),
-                MangaDotNetLoginMiddleware(config, self, loginHandler),
+                MangaDotNetLoginMiddleware(config),
                 CloudflareMiddleware(),
             ],
         )
@@ -533,6 +331,197 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     async def close(self) -> None:
         await self._client.close()
+
+    async def login(self, handler: MangaDotNetLoginRequestHandler) -> bool:
+        try:
+            async with (
+                create_browser() as browser,
+                await cast(Browser, browser).new_context() as context,
+                await context.new_page() as page,
+                ClickSolver(
+                    framework=FrameworkType.CAMOUFOX, page=page
+                ) as solver,
+            ):
+                response = cast(
+                    PlaywrightResponse,
+                    await page.goto(f"{self._BASE_URL}/login"),
+                )
+
+                if not await solve_cloudflare_captcha_interstitial(
+                    solver, page, response
+                ):
+                    logging.getLogger(__name__).error(
+                        "[Camoufox] Failed to solve cloudflare captcha"
+                    )
+                    return False
+
+                # Prevent ads from redirecting this page.
+                await page.evaluate(
+                    "localStorage.setItem('lastPopAt', Date.now());"
+                )
+
+                while True:
+                    username_element = page.locator("#identifier")
+                    password_element = page.locator("#password")
+
+                    try:
+                        await username_element.wait_for(
+                            timeout=5000, state="attached"
+                        )
+                        await password_element.wait_for(
+                            timeout=5000, state="attached"
+                        )
+                    except TimeoutError:
+                        logging.getLogger(__name__).error(
+                            "Unable to find username/password field"
+                        )
+                        return False
+
+                    (
+                        username,
+                        password,
+                    ) = await handler.request_credentials()
+
+                    if username is None or password is None:
+                        return False
+
+                    try:
+                        await username_element.fill(username, timeout=5000)
+                        await password_element.fill(password, timeout=5000)
+                    except TimeoutError:
+                        logging.getLogger(__name__).error(
+                            "Unable to find username/password field"
+                        )
+                        return False
+
+                    if not await solve_cloudflare_captcha_turnstile(
+                        solver,
+                        page,
+                        'form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
+                    ):
+                        logging.getLogger(__name__).error(
+                            "[Camoufox] Failed to solve cloudflare captcha"
+                        )
+                        return False
+
+                    submit_button = page.get_by_text("Log in", exact=True)
+
+                    if await submit_button.count() == 0:
+                        logging.getLogger(__name__).error(
+                            "[Camoufox] Log in button not found"
+                        )
+                        return False
+
+                    await submit_button.click()
+
+                    async def check_for_alert() -> None:
+                        alert = page.locator('div[role="alert"]')
+
+                        while await alert.count() == 0:
+                            await sleep(1)
+
+                    async def check_for_logged_in() -> None:
+                        username_element = page.locator("#identifier")
+
+                        while await username_element.count() > 0:
+                            await sleep(1)
+
+                    task = create_task(check_for_alert())
+                    task2 = create_task(check_for_logged_in())
+
+                    await wait(
+                        [task, task2], return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    if task.done():
+                        task2.cancel()
+                        await page.reload()
+                        continue
+
+                    if task2.done():
+                        task.cancel()
+                        break
+
+                while True:
+                    second_factor_header = page.get_by_text(
+                        "Confirm your second factor"
+                    )
+
+                    if await second_factor_header.count() >= 1:
+                        otp = await handler.request_otp()
+
+                        if otp is None:
+                            return False
+
+                        input = cast(
+                            ElementHandle,
+                            await page.wait_for_selector(
+                                "#aal2-totp", strict=True
+                            ),
+                        )
+
+                        await input.fill(otp)
+
+                        submit_button = page.get_by_text("Verify", exact=True)
+
+                        if await submit_button.count() == 0:
+                            logging.getLogger(__name__).error(
+                                "Verify button not found"
+                            )
+                            return False
+
+                        await submit_button.click()
+
+                        async def check_for_alert() -> None:
+                            alert = page.locator('div[role="alert"]')
+
+                            while await alert.count() == 0:
+                                await sleep(1)
+
+                        async def check_for_logged_in() -> None:
+                            locator = page.locator("#aal2-totp")
+
+                            while await locator.count() > 0:
+                                await sleep(1)
+
+                        task = create_task(check_for_alert())
+                        task2 = create_task(check_for_logged_in())
+
+                        await wait(
+                            [task, task2], return_when=asyncio.FIRST_COMPLETED
+                        )
+
+                        if task.done():
+                            task2.cancel()
+                            continue
+
+                        if task2.done():
+                            task.cancel()
+                            break
+                    else:
+                        break
+
+                cookies = await context.cookies(self._BASE_URL)
+
+                for cookie in cookies:
+                    if cookie.get("name") == self._AUTHENTICATION_COOKIE:
+                        self._config.mangadotnet_user_session = cookie.get(
+                            "value"
+                        )
+                        return True
+
+                logging.getLogger(__name__).error(
+                    "[Camoufox] Unable to find the authentication cookie"
+                )
+                return False
+        except Error:
+            logging.getLogger(__name__).exception(
+                "[Camoufox] Failed to authenticate due to camoufox error"
+            )
+            return False
+
+    async def logout(self) -> None:
+        self._config.mangadotnet_user_session = None
 
     @retryable_client_method
     async def get_user_profile(self) -> MangaDotNetProfile:
