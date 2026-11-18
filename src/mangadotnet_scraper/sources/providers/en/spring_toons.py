@@ -4,7 +4,7 @@ from typing import override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -19,7 +19,7 @@ from mangadotnet_scraper.utilities import dict_get_recursive
 class SpringToonsSourceProvider(BaseSourceProvider):
     GROUP_ID = "Spring Toons"
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: ConfigProvider) -> None:
         super().__init__(
             config,
             source_id="en.spring_toons",

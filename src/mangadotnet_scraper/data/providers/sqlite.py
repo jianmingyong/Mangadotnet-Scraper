@@ -8,9 +8,9 @@ from cysqlite import connect as cysqlite_connect
 
 from mangadotnet_scraper.data.base import (
     DataProvider,
-    SourceEntryChapterEntity,
     SourceEntryEntity,
 )
+from mangadotnet_scraper.data.entities import SourceEntryChapterEntity
 
 
 class SqliteDataProvider(DataProvider):

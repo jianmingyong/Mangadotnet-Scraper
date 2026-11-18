@@ -4,7 +4,7 @@ from typing import Final, TypedDict, Unpack, override
 from asynciolimiter import Limiter
 
 from mangadotnet_scraper.camoufox_utils import get_default_user_agent
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -72,7 +72,7 @@ class EzManhwaTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: Config,
+        config: ConfigProvider,
         group_name: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:

@@ -2,12 +2,10 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import AbstractAsyncContextManager
 from math import floor
-from typing import Final, Literal, ReadOnly, TypedDict, override
-
-from asynciolimiter import LeakyBucketLimiter
+from typing import Final, Literal, ReadOnly, Self, TypedDict, override
 
 from mangadotnet_scraper.network import (
-    HttpClient,
+    HttpClientProvider,
     create_http_client,
     retryable_client_method,
 )
@@ -33,21 +31,20 @@ class MangaBakaEntryDataTitle(TypedDict):
 
 
 class MangaBakaApi(AbstractAsyncContextManager):
-    _client: Final[HttpClient]
-    _limiter: Final[LeakyBucketLimiter]
+    _client: Final[HttpClientProvider]
 
     def __init__(self) -> None:
-        self._limiter = LeakyBucketLimiter(0.5, capacity=30)
-        self._client = create_http_client(
-            "https://api.mangabaka.org", limiter=self._limiter
-        )
+        self._client = create_http_client("https://api.mangabaka.org")
+
+    @override
+    async def __aenter__(self) -> Self:
+        return self
 
     @override
     async def __aexit__(self, *args) -> None:
         await self.close()
 
     async def close(self) -> None:
-        self._limiter.close()
         await self._client.close()
 
     @retryable_client_method
@@ -115,13 +112,17 @@ class MangaBakaApi(AbstractAsyncContextManager):
                 for matched_title in data.get("titles", []):
                     match_target = matched_title.get("title", "").casefold()
 
-                    if len(match_target) > 20 and match_target.startswith(
-                        match_base[: floor(len(match_base) * 0.75)]
-                    ):
+                    if match_base == match_target:
                         matches.append(data)
                         break
 
-                    if match_base == match_target:
+                    if (
+                        len(match_base) > 20
+                        and len(match_target) > 20
+                        and match_target.startswith(
+                            match_base[: floor(len(match_base) * 0.9)]
+                        )
+                    ):
                         matches.append(data)
                         break
 

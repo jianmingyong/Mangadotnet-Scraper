@@ -81,14 +81,18 @@ class HttpResponseError(Exception):
         status: int,
         message: str,
         headers: Mapping[str, str] | None = None,
+        *args,
+        **kwargs,
     ) -> None:
+        super().__init__(*args, **kwargs)
+
         self.request = request
         self.status = status
         self.message = message
         self.headers = headers
 
 
-class BaseHttpClientProvider(AbstractAsyncContextManager):
+class HttpClientProvider(AbstractAsyncContextManager):
     @override
     async def __aenter__(self) -> Self:
         return self

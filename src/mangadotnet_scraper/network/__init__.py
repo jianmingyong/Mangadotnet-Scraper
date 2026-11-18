@@ -2,11 +2,10 @@ import logging
 from asyncio import sleep
 from collections.abc import Callable, Coroutine, Mapping
 from functools import wraps
-from typing import Any, Final
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
-from .base import BaseHttpClientProvider, HttpResponseError, Response
+from .base import HttpClientProvider, HttpResponseError, Response
 from .providers import AioHttpClientProvider
 
 
@@ -41,13 +40,13 @@ def retryable_client_method[**P, R](
             try:
                 return await async_func(*args, **kwargs)
             except OSError:
-                logging.getLogger(__name__).error(
+                logging.getLogger(__name__).exception(
                     f"Connection lost. Retry attempt {retry + 1}/{max_retry}"
                 )
                 await sleep(retry_wait_duration * (retry + 1))
             except HttpResponseError as error:
                 if retryable_status(error):
-                    logging.getLogger(__name__).error(
+                    logging.getLogger(__name__).warning(
                         f"Server response with {error.status} ({error.message}). Retry attempt {retry + 1}/{max_retry}"
                     )
                     await sleep(retry_wait_duration * (retry + 1))
@@ -66,158 +65,13 @@ def create_http_client(
     cookies: Mapping[str, str] | None = None,
     limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
     **kwargs,
-) -> HttpClient:
-    return HttpClient(
-        AioHttpClientProvider(
-            base_url, user_agent, headers, cookies, limiter, **kwargs
-        )
+) -> HttpClientProvider:
+    return AioHttpClientProvider(
+        base_url, user_agent, headers, cookies, limiter, **kwargs
     )
 
 
-class HttpClient(BaseHttpClientProvider):
-    _provider: Final[BaseHttpClientProvider]
-
-    def __init__(self, provider: BaseHttpClientProvider) -> None:
-        self._provider = provider
-
-    async def close(self) -> None:
-        await self._provider.close()
-
-    async def get(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.get(
-            url,
-            params,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def head(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.head(
-            url,
-            params,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def post(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.post(
-            url,
-            params,
-            data,
-            json,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def put(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.put(
-            url,
-            params,
-            data,
-            json,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def delete(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.delete(
-            url,
-            params,
-            data,
-            json,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def options(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.options(
-            url,
-            params,
-            data,
-            json,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-    async def patch(
-        self,
-        url: str,
-        params: Mapping[str, Any] | None = None,
-        data: Any | None = None,
-        json: Any | None = None,
-        cookies: Mapping[str, str] | None = None,
-        headers: Mapping[str, str] | None = None,
-        **kwargs,
-    ) -> Response:
-        return await self._provider.patch(
-            url,
-            params,
-            data,
-            json,
-            cookies,
-            headers,
-            **kwargs,
-        )
-
-
 __all__ = [
-    "HttpClient",
     "HttpResponseError",
     "Response",
     "create_http_client",

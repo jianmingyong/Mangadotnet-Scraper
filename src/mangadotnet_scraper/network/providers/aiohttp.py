@@ -12,14 +12,13 @@ from aiohttp import (
     ClientRequest,
     ClientResponse,
     ClientSession,
-    ClientTimeout,
     TCPConnector,
 )
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 from mangadotnet_scraper.network.base import (
-    BaseHttpClientProvider,
+    HttpClientProvider,
     RequestInfo,
     Response,
 )
@@ -76,7 +75,7 @@ class Middleware(ABC):
         return await handler(request)
 
 
-class RateLimitMiddleware(Middleware):
+class UserRateLimitMiddleware(Middleware):
     _limiter: Final[LeakyBucketLimiter | Limiter | StrictLimiter | None]
 
     def __init__(
@@ -93,6 +92,48 @@ class RateLimitMiddleware(Middleware):
             await self._limiter.wait()
 
         return await handler(request)
+
+
+class ServerRateLimitMiddleware(Middleware):
+    _remaining_limit: int
+    _reset: int
+
+    def __init__(self) -> None:
+        self._remaining_limit = -1
+        self._reset = -1
+
+    @override
+    async def __call__(
+        self, request: ClientRequest, handler: ClientHandlerType
+    ) -> ClientResponse:
+        if self._remaining_limit <= 1 and self._reset > 0:
+            await sleep(self._reset)
+
+        response = await handler(request)
+
+        remaining = response.headers.get(
+            "X-RateLimit-Remaining",
+            response.headers.get("RateLimit-Remaining"),
+        )
+
+        if remaining is not None and remaining.isdigit():
+            self._remaining_limit = int(remaining)
+        else:
+            self._remaining_limit = -1
+
+        reset = response.headers.get(
+            "X-RateLimit-Reset", response.headers.get("RateLimit-Reset")
+        )
+
+        if reset is not None and reset.isdigit():
+            self._reset = int(reset)
+
+            if self._reset > time():
+                self._reset -= int(time())
+        else:
+            self._reset = -1
+
+        return response
 
 
 class CloudflareMiddleware(Middleware):
@@ -177,14 +218,11 @@ class RateLimitedMiddleware(Middleware):
             retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
 
             # Common Rate limit headers
-            if retry_timer is None:
-                retry_timer = response.headers.get("X-RateLimit-Reset")
+            retry_timer = response.headers.get(
+                "X-RateLimit-Reset", response.headers.get("RateLimit-Reset")
+            )
 
-            # Common Rate limit headers
-            if retry_timer is None:
-                retry_timer = response.headers.get("RateLimit-Reset")
-
-            if retry_timer is not None and retry_timer.isnumeric():
+            if retry_timer is not None and retry_timer.isdigit():
                 retry_timer = int(retry_timer)
             else:
                 retry_timer = self._retry_wait_duration
@@ -203,7 +241,7 @@ class RateLimitedMiddleware(Middleware):
             return await handler(request)
 
 
-class AioHttpClientProvider(BaseHttpClientProvider):
+class AioHttpClientProvider(HttpClientProvider):
     _client: Final[ClientSession]
 
     def __init__(
@@ -226,12 +264,11 @@ class AioHttpClientProvider(BaseHttpClientProvider):
         if user_agent is not None:
             _headers.update({"User-Agent": user_agent})
 
-        timeout = ClientTimeout(total=60, sock_connect=30)
-
         middlewares = [
+            UserRateLimitMiddleware(limiter),
+            ServerRateLimitMiddleware(),
             RateLimitedMiddleware(),
             CloudflareMiddleware(user_agent),
-            RateLimitMiddleware(limiter),
         ]
 
         if kwargs.get("middlewares") is not None:
@@ -243,7 +280,6 @@ class AioHttpClientProvider(BaseHttpClientProvider):
             connector=connector,
             cookies=cookies,
             headers=_headers,
-            timeout=timeout,
             middlewares=middlewares,
             **kwargs,
         )

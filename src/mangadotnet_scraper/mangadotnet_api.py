@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
-from asyncio import Lock, sleep
+from abc import ABC, abstractmethod
+from asyncio import Lock, create_task, sleep, wait
 from base64 import b64encode
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
@@ -14,6 +16,7 @@ from typing import (
     Literal,
     NotRequired,
     ReadOnly,
+    Self,
     TypedDict,
     cast,
     override,
@@ -34,17 +37,16 @@ from playwright.async_api import (
 from playwright.async_api import (
     Response as PlaywrightResponse,
 )
-from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
-from playwright_captcha.utils.exceptions import (
-    CaptchaDetectionError,
-    CaptchaSolvingError,
-)
-from pyotp import TOTP
+from playwright_captcha import ClickSolver, FrameworkType
 
-from mangadotnet_scraper.camoufox_utils import create_browser
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.camoufox_utils import (
+    create_browser,
+    solve_cloudflare_captcha_interstitial,
+    solve_cloudflare_captcha_turnstile,
+)
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.network import (
-    HttpClient,
+    HttpClientProvider,
     HttpResponseError,
     create_http_client,
     retryable_client_method,
@@ -53,7 +55,8 @@ from mangadotnet_scraper.network.providers.aiohttp import (
     CloudflareMiddleware,
     Middleware,
     RateLimitedMiddleware,
-    RateLimitMiddleware,
+    ServerRateLimitMiddleware,
+    UserRateLimitMiddleware,
 )
 from mangadotnet_scraper.utilities import dict_get_recursive
 
@@ -184,17 +187,34 @@ class MangaDotNetTusCapabilities:
     supported_extensions: Sequence[str]
 
 
+class MangaDotNetLoginRequestHandler(ABC):
+    @abstractmethod
+    async def request_credentials(self) -> tuple[str, str]: ...
+
+    @abstractmethod
+    async def request_otp(self) -> str: ...
+
+
 class MangaDotNetLoginMiddleware(Middleware):
     _UNAUTHORIZED_STATUS_CODE = 401
     _AUTHENTICATION_COOKIE = "ory_kratos_session"
+    _CLOUDFLARE_COOKIE_NAME = "cf_clearance"
 
-    _config: Final[Config]
+    _config: Final[ConfigProvider]
     _api: Final[MangaDotNetApi]
+    _handler: Final[MangaDotNetLoginRequestHandler]
+
     _lock: Final[Lock]
 
-    def __init__(self, config: Config, api: MangaDotNetApi) -> None:
+    def __init__(
+        self,
+        config: ConfigProvider,
+        api: MangaDotNetApi,
+        handler: MangaDotNetLoginRequestHandler,
+    ) -> None:
         self._config = config
         self._api = api
+        self._handler = handler
         self._lock = Lock()
 
     @property
@@ -217,11 +237,11 @@ class MangaDotNetLoginMiddleware(Middleware):
 
         response = await update_cookies_and_request()
 
-        if response.status == self._UNAUTHORIZED_STATUS_CODE:
+        if response.status == 401:
             async with self._lock:
                 response = await update_cookies_and_request()
 
-                if response.status != self._UNAUTHORIZED_STATUS_CODE:
+                if response.status != 401:
                     return response
 
                 self.user_session_cookie = await self.handle_authentication()
@@ -231,107 +251,70 @@ class MangaDotNetLoginMiddleware(Middleware):
 
     async def handle_authentication(self) -> str | None:
         try:
-            if (
-                self._config.mangadotnet_username is None
-                or self._config.mangadotnet_password is None
-            ):
-                logging.getLogger(__name__).error(
-                    "Authentication requires both username and password"
-                )
-                return None
-
             async with (
-                create_browser() as browser,
+                create_browser(False) as browser,
                 await cast(Browser, browser).new_context() as context,
-            ):
-                page = await context.new_page()
-
-                async with ClickSolver(
+                await context.new_page() as page,
+                ClickSolver(
                     framework=FrameworkType.CAMOUFOX, page=page
-                ) as solver:
-                    response = cast(
-                        PlaywrightResponse,
-                        await page.goto(f"{self._api._BASE_URL}/login"),
+                ) as solver,
+            ):
+                response = cast(
+                    PlaywrightResponse,
+                    await page.goto(f"{self._api._BASE_URL}/login"),
+                )
+
+                if not await solve_cloudflare_captcha_interstitial(
+                    solver, page, response
+                ):
+                    logging.getLogger(__name__).error(
+                        "[Camoufox] Failed to solve cloudflare captcha"
                     )
+                    return None
 
-                    cf_header = await response.header_value("cf-mitigated")
+                # Prevent ads from redirecting this page.
+                await page.evaluate(
+                    "localStorage.setItem('lastPopAt', Date.now());"
+                )
 
-                    if cf_header == "challenge":
-                        try:
-                            # Wait for 6 seconds in case it auto solves
-                            await sleep(6)
+                while True:
+                    username_element = page.locator("#identifier")
+                    password_element = page.locator("#password")
 
-                            if (
-                                await page.locator(
-                                    "input[name='cf-turnstile-response']"
-                                ).count()
-                                > 0
-                            ):
-                                await solver.solve_captcha(
-                                    captcha_container=page,
-                                    captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL,
-                                )
-                        except (
-                            CaptchaDetectionError,
-                            CaptchaSolvingError,
-                        ):
-                            logging.getLogger(__name__).error(
-                                "Failed to solve cloudflare captcha"
-                            )
-                            return None
-                    elif not response.ok:
+                    try:
+                        await username_element.wait_for(
+                            timeout=5000, state="attached"
+                        )
+                        await password_element.wait_for(
+                            timeout=5000, state="attached"
+                        )
+                    except TimeoutError:
                         logging.getLogger(__name__).error(
-                            f"Failed to authenticate due to request {response.status} ({response.status_text})"
+                            "Unable to find username/password field"
                         )
                         return None
 
-                    await page.evaluate(
-                        "localStorage.setItem('lastPopAt', Date.now());"
-                    )
+                    (
+                        username,
+                        password,
+                    ) = await self._handler.request_credentials()
 
                     try:
-                        username_element = cast(
-                            ElementHandle,
-                            await page.wait_for_selector(
-                                "#identifier", strict=True
-                            ),
-                        )
-
-                        await username_element.type(
-                            self._config.mangadotnet_username
-                        )
-                    except Error:
+                        await username_element.fill(username, timeout=5000)
+                        await password_element.fill(password, timeout=5000)
+                    except TimeoutError:
                         logging.getLogger(__name__).error(
-                            "Unable to find username field"
+                            "Unable to find username/password field"
                         )
                         return None
 
-                    try:
-                        password_element = cast(
-                            ElementHandle,
-                            await page.wait_for_selector(
-                                "#password", strict=True
-                            ),
-                        )
-
-                        await password_element.type(
-                            self._config.mangadotnet_password
-                        )
-                    except Error:
+                    if not await solve_cloudflare_captcha_turnstile(
+                        solver,
+                        page,
+                        'form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
+                    ):
                         logging.getLogger(__name__).error(
-                            "Unable to find password field"
-                        )
-                        return None
-
-                    try:
-                        await solver.solve_captcha(
-                            captcha_container=page,
-                            captcha_type=CaptchaType.CLOUDFLARE_TURNSTILE,
-                            expected_content_selector='form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
-                        )
-                    except CaptchaDetectionError, CaptchaSolvingError:
-                        logging.getLogger(__name__).error(
-                            "Failed to solve cloudflare captcha"
+                            "[Camoufox] Failed to solve cloudflare captcha"
                         )
                         return None
 
@@ -339,54 +322,75 @@ class MangaDotNetLoginMiddleware(Middleware):
 
                     if await submit_button.count() == 0:
                         logging.getLogger(__name__).error(
-                            "Log in button not found"
+                            "[Camoufox] Log in button not found"
                         )
                         return None
-
-                    while (
-                        not page.is_closed()
-                        and await submit_button.is_disabled()
-                    ):
-                        await sleep(1)
 
                     await submit_button.click()
 
-                await sleep(10)
+                    async def check_for_alert() -> None:
+                        alert = page.locator('div[role="alert"]')
 
-                second_factor_header = page.get_by_text(
-                    "Confirm your second factor"
-                )
+                        while await alert.count() == 0:
+                            await sleep(1)
 
-                if await second_factor_header.count() >= 1:
-                    # Handle second factor
-                    otp_key = self._config.mangadotnet_otp
+                    async def check_for_logged_in() -> None:
+                        username_element = page.locator("#identifier")
 
-                    if otp_key is None:
-                        logging.getLogger(__name__).error(
-                            "mangadotnet_otp key not found"
-                        )
-                        return None
+                        while await username_element.count() > 0:
+                            await sleep(1)
 
-                    totp = TOTP(otp_key)
+                    task = create_task(check_for_alert())
+                    task2 = create_task(check_for_logged_in())
 
-                    input = cast(
-                        ElementHandle,
-                        await page.wait_for_selector(
-                            "#aal2-totp", strict=True
-                        ),
+                    await wait(
+                        [task, task2], return_when=asyncio.FIRST_COMPLETED
                     )
 
-                    await input.type(totp.now())
+                    if task.done():
+                        task2.cancel()
+                        await page.reload()
+                        continue
 
-                    submit_button = page.get_by_text("Verify", exact=True)
+                    if task2.done():
+                        task.cancel()
+                        break
 
-                    if await submit_button.count() == 0:
-                        logging.getLogger(__name__).error(
-                            "Verify button not found"
+                while True:
+                    second_factor_header = page.get_by_text(
+                        "Confirm your second factor"
+                    )
+
+                    if await second_factor_header.count() >= 1:
+                        otp = await self._handler.request_otp()
+
+                        input = cast(
+                            ElementHandle,
+                            await page.wait_for_selector(
+                                "#aal2-totp", strict=True
+                            ),
                         )
-                        return None
 
-                    await submit_button.click()
+                        await input.type(otp)
+
+                        submit_button = page.get_by_text("Verify", exact=True)
+
+                        if await submit_button.count() == 0:
+                            logging.getLogger(__name__).error(
+                                "Verify button not found"
+                            )
+                            return None
+
+                        await submit_button.click()
+
+                        await sleep(5)
+
+                        if await submit_button.count() > 0:
+                            continue
+                        else:
+                            break
+                    else:
+                        break
 
                 try:
                     await page.wait_for_url(
@@ -407,20 +411,20 @@ class MangaDotNetLoginMiddleware(Middleware):
                         return cookie.get("value")
 
                 logging.getLogger(__name__).error(
-                    "Unable to find the authentication cookie"
+                    "[Camoufox] Unable to find the authentication cookie"
                 )
                 return None
         except Error:
             logging.getLogger(__name__).exception(
-                "Failed to authenticate due to camoufox error"
+                "[Camoufox] Failed to authenticate due to camoufox error"
             )
             return None
 
 
 class MangaDotNetApi(AbstractAsyncContextManager):
-    _BASE_URL = "https://mangadot.net"
-    _TUS_VERSION = "1.0.0"
-    _TUS_MAX_UPLOAD_SIZE = 900 * 1024 * 1024
+    _BASE_URL: str = "https://mangadot.net"
+    _TUS_VERSION: str = "1.0.0"
+    _TUS_MAX_UPLOAD_SIZE: int = 900 * 1024 * 1024
 
     _NON_RESUMABLE_ERROR: Final[Sequence[int]] = [
         400,
@@ -432,8 +436,8 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         422,
     ]
 
-    _config: Final[Config]
-    _client: Final[HttpClient]
+    _config: Final[ConfigProvider]
+    _client: Final[HttpClientProvider]
 
     @staticmethod
     def _resolve_ptr_table_json(
@@ -494,17 +498,26 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
         return ",".join(data)
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: ConfigProvider,
+        loginHandler: MangaDotNetLoginRequestHandler,
+    ) -> None:
         self._config = config
         self._client = create_http_client(
             self._BASE_URL,
             middlewares=[
+                UserRateLimitMiddleware(),
+                ServerRateLimitMiddleware(),
                 RateLimitedMiddleware(),
-                MangaDotNetLoginMiddleware(config, self),
+                MangaDotNetLoginMiddleware(config, self, loginHandler),
                 CloudflareMiddleware(),
-                RateLimitMiddleware(),
             ],
         )
+
+    @override
+    async def __aenter__(self) -> Self:
+        return self
 
     @override
     async def __aexit__(self, *args) -> None:
@@ -515,7 +528,9 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     @retryable_client_method
     async def get_user_profile(self) -> MangaDotNetProfile:
-        async with await self._client.get("/api/profile") as response:
+        async with await self._client.get(
+            "/api/profile", timeout=None
+        ) as response:
             response.raise_for_status()
             return await response.json()
 

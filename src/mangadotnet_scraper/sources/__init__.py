@@ -6,7 +6,7 @@ from collections.abc import (
 )
 from typing import ClassVar, Final
 
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 
 from .base import BaseSourceProvider
 
@@ -14,10 +14,10 @@ from .base import BaseSourceProvider
 class SourceProvider:
     _provider: ClassVar[MutableSequence[type[BaseSourceProvider]]] = []
 
-    _config: Final[Config]
+    _config: Final[ConfigProvider]
     _created_provider: MutableMapping[str, BaseSourceProvider]
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: ConfigProvider) -> None:
         self._config = config
         self._created_provider = {}
 

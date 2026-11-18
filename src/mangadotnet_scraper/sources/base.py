@@ -21,9 +21,9 @@ from camoufox import AsyncCamoufox
 from playwright.async_api import Browser, Error
 
 from mangadotnet_scraper.camoufox_utils import create_browser
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.network import (
-    HttpClient,
+    HttpClientProvider,
     create_http_client,
     retryable_client_method,
 )
@@ -108,7 +108,7 @@ class SourceInfo(TypedDict):
 
 
 class BaseSourceProvider(AbstractAsyncContextManager):
-    config: Final[Config]
+    config: Final[ConfigProvider]
 
     source_id: Final[str]
     name: Final[str]
@@ -127,14 +127,14 @@ class BaseSourceProvider(AbstractAsyncContextManager):
 
     settings: Mapping[str, Any]
 
-    client: HttpClient
+    client: HttpClientProvider
 
     _camoufox: AsyncCamoufox | None
     _browser: Browser | None
 
     def __init__(
         self,
-        config: Config,
+        config: ConfigProvider,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
         self.config = config
@@ -168,7 +168,7 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         await self.close()
 
     @classmethod
-    def create_provider(cls, config: Config) -> Self:
+    def create_provider(cls, config: ConfigProvider) -> Self:
         if cls is BaseSourceProvider:
             raise ValueError("Cannot initialize base module.")
 

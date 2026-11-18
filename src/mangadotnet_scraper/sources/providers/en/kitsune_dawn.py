@@ -1,10 +1,10 @@
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates import KeyoAppLivewireTemplate
 
 
 class KitsuneDawnSourceProvider(KeyoAppLivewireTemplate):
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: ConfigProvider) -> None:
         super().__init__(
             config,
             group_name="kitsunedawn",

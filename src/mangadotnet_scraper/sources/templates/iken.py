@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Final, ReadOnly, TypedDict, Unpack, override
 
-from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -75,7 +75,7 @@ class IkenTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: Config,
+        config: ConfigProvider,
         group_name: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:

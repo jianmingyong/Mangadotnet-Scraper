@@ -23,31 +23,63 @@ from rich.progress import (
 from rich.rule import Rule
 
 import mangadotnet_scraper.sources.providers  # noqa: F401
-from mangadotnet_scraper.data import Data, SourceEntryEntity
+from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.data import DataProvider
+from mangadotnet_scraper.data.entities import SourceEntryEntity
 from mangadotnet_scraper.data.providers import SqliteDataProvider
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
-from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
+from mangadotnet_scraper.mangadotnet_api import (
+    MangaDotNetApi,
+    MangaDotNetLoginRequestHandler,
+)
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 from mangadotnet_scraper.sources.base import Chapter
 
-from .config import Config
 from .config.providers import JsonConfigProvider
 
 
+class LoginHandler(MangaDotNetLoginRequestHandler):
+    async def request_credentials(self) -> tuple[str, str]:
+        username = None
+        password = None
+
+        while username is None or len(username) == 0:
+            username = await questionary.text(
+                "Please enter MangaDotNet Username:"
+            ).ask_async()
+
+        while password is None or len(password) == 0:
+            password = await questionary.password(
+                "Please enter MangaDotNet password:"
+            ).ask_async()
+
+        return username, password
+
+    async def request_otp(self) -> str:
+        otp = None
+
+        while otp is None or len(otp) == 0:
+            otp = await questionary.text(
+                "Please enter MangaDotNet OTP:"
+            ).ask_async()
+
+        return otp
+
+
 class App(AbstractAsyncContextManager):
-    config: Final[Config]
-    data: Final[Data]
+    config: Final[ConfigProvider]
+    data: Final[DataProvider]
     sources: Final[SourceProvider]
 
     mangabaka_api: Final[MangaBakaApi]
     mangadotnet_api: Final[MangaDotNetApi]
 
     def __init__(self) -> None:
-        self.config = Config(JsonConfigProvider())
-        self.data = Data(SqliteDataProvider())
+        self.config = JsonConfigProvider()
+        self.data = SqliteDataProvider()
         self.sources = SourceProvider(self.config)
         self.mangabaka_api = MangaBakaApi()
-        self.mangadotnet_api = MangaDotNetApi(self.config)
+        self.mangadotnet_api = MangaDotNetApi(self.config, LoginHandler())
 
     @override
     async def __aenter__(self) -> Self:
@@ -69,6 +101,7 @@ class App(AbstractAsyncContextManager):
         self.config.load()
         self.data.initialize()
 
+        await self.mangadotnet_api.get_user_profile()
         await self.show_main_menu()
 
     def generate_choices(self, text: str) -> Sequence[Choice]:
