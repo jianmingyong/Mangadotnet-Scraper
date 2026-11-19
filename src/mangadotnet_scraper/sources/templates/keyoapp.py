@@ -132,12 +132,12 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                     raise SourceError("Unable to get chapter title")
 
                 title_match = re.search(
-                    "Chapter (\\d+\\.\\d+|\\d+)",
+                    r"Chapter\s+(\d+\.\d+|\d+)",
                     chapter_title.replace("O", "0"),
                 )
 
                 if title_match is None:
-                    raise SourceError("Unable to get chapter number")
+                    chapter_number = None
                 else:
                     chapter_number = float(title_match[1])
 
@@ -154,7 +154,9 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                         type="chapter",
                         volume_number=None,
                         chapter_number=chapter_number,
-                        title=clean_chapter_title(chapter_number),
+                        title=clean_chapter_title(chapter_number)
+                        if chapter_number is not None
+                        else chapter_title,
                         link=chapter_link,
                     )
                 )

@@ -1,8 +1,6 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Final, TypedDict, Unpack, override
 
-from asynciolimiter import Limiter
-
 from mangadotnet_scraper.camoufox_utils import get_default_user_agent
 from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.sources import BaseSourceProvider
@@ -84,9 +82,6 @@ class EzManhwaTemplate(BaseSourceProvider):
     async def close(self) -> None:
         await super().close()
 
-        if self.limiter is not None:
-            self.limiter.close()
-
     @override
     async def _on_initialize(self) -> None:
         if self.user_agent is None:
@@ -100,9 +95,6 @@ class EzManhwaTemplate(BaseSourceProvider):
                 "Origin": self.base_url,
                 "Referer": f"{self.base_url}/",
             }
-
-        if self.limiter is None:
-            self.limiter = Limiter(1, max_burst=60)
 
     @override
     async def _on_get_manga_list(self) -> AsyncGenerator[Manga]:

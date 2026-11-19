@@ -118,6 +118,10 @@ class CySqliteDataProvider(DataProvider):
             SourceEntry.delete_by_id(id)
 
     @override
+    def get_source_entry(self, rowid: int) -> SourceEntry:
+        return SourceEntry.get_by_id(rowid)
+
+    @override
     def get_source_entries(
         self,
         source_id: str,

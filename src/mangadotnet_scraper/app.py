@@ -131,10 +131,12 @@ class App(AbstractAsyncContextManager):
 
         await self.show_main_menu()
 
-    def generate_choices(self, text: str) -> Sequence[Choice]:
+    def generate_choices(self, text: str | None = None) -> Sequence[Choice]:
         return [
             Choice(
-                f"{text} {source.name} [{','.join(source.languages)}]",
+                f"{text} {source.name} [{','.join(source.languages)}]"
+                if text is not None
+                else f"{source.name} [{','.join(source.languages)}]",
                 source.source_id,
             )
             for source in self.sources.get_enabled_sources()
@@ -148,12 +150,8 @@ class App(AbstractAsyncContextManager):
                     Choice("Fetch Listing", 1),
                     Choice("Fetch Listing Details With Mapping", 2),
                     Choice("Fetch Listing Details Without Mapping", 3),
-                    Choice(
-                        "Manual Source Mapping (Only Unmapped Entries)",
-                        5,
-                    ),
-                    Choice("Manual Source Editing", 7),
-                    Choice("Upload", 4),
+                    Choice("Manual Source Editing", 4),
+                    Choice("Upload", 5),
                     Choice("Settings", 6),
                     Choice("Quit", -1),
                 ],
@@ -233,6 +231,29 @@ class App(AbstractAsyncContextManager):
                             await self.fetch_source_listing_details(
                                 source, True
                             )
+
+                case 4:
+                    # Manual Source Editing
+                    while True:
+                        selection = await questionary.select(
+                            "Select Source to Manual Mapping",
+                            choices=[
+                                *self.generate_choices(),
+                                Choice("Back", -1),
+                            ],
+                        ).ask_async()
+
+                        if selection is None or selection == -1:
+                            break
+                        else:
+                            async with self.sources.get_source(
+                                selection
+                            ) as source:
+                                await self.manual_source_editing(source)
+
+                case 5:
+                    # Upload
+                    pass
 
                 case 6:
                     # Settings
@@ -340,6 +361,10 @@ class App(AbstractAsyncContextManager):
                         )
 
                         if need_mapping:
+                            source_entry.alt_titles = "\n".join(
+                                manga.alt_titles
+                            )
+
                             if source_entry.mangabaka_id is None:
                                 source_entry.mangabaka_id = (
                                     await self.mangabaka_api.get_id_by_title(
@@ -507,3 +532,92 @@ class App(AbstractAsyncContextManager):
 
                 case _:
                     break
+
+    async def manual_source_editing(self, source: BaseSourceProvider) -> None:
+        async def show_initial_menu() -> None:
+            while True:
+                entries = [*self.data.get_source_entries(source.source_id)]
+
+                choices = [
+                    Choice(
+                        f"[{entry.rowid}] [{entry.mangadotnet_id if entry.mangadotnet_id is not None else 'NULL'}] {entry.title} [+{len(entry.alt_titles.splitlines()) if entry.alt_titles is not None else 0} Alt Titles]",
+                        entry.rowid,
+                    )
+                    for entry in entries
+                ]
+
+                selection = await questionary.select(
+                    f"{source.name} - {len(entries)} Titles | Select title to edit:",
+                    choices=[
+                        *choices,
+                        Choice("Back", -1),
+                    ],
+                    use_jk_keys=False,
+                    use_search_filter=True,
+                ).ask_async()
+
+                if selection is None or selection == -1:
+                    break
+                else:
+                    await show_manga_info_menu(selection)
+
+        async def show_manga_info_menu(rowid: int) -> None:
+            while True:
+                entry = self.data.get_source_entry(rowid)
+
+                print(f"[{rowid}] {entry.title}")
+                print("Manga Id:", entry.manga_id)
+                print("Link:", entry.link)
+                print("Alt Titles:")
+
+                if entry.alt_titles is None:
+                    print("== No alt titles available ==")
+                else:
+                    for item in entry.alt_titles.splitlines():
+                        print(item)
+
+                print(
+                    "MangaBaka Id:",
+                    entry.mangabaka_id
+                    if entry.mangabaka_id is not None
+                    else "NULL",
+                )
+                print(
+                    "MangaDotNet Id:",
+                    entry.mangadotnet_id
+                    if entry.mangadotnet_id is not None
+                    else "NULL",
+                )
+
+                print("Skip Upload:", entry.skip_upload)
+
+                selection = await questionary.select(
+                    "What would you like to do?",
+                    choices=[
+                        Choice("Update Mapping", 1),
+                        Choice("Enable/Disable Upload", 2),
+                        Choice("Fetch Chapters", 3),
+                        # Choice("Modify Chapter", 4),
+                        # Choice("Upload", 5),
+                        Choice("Delete Entry", 6),
+                        Choice("Back", -1),
+                    ],
+                    use_shortcuts=True,
+                ).ask_async()
+
+                if selection is None or selection == -1:
+                    break
+                elif selection == 1:
+                    # await show_update_mapping(rowid)
+                    pass
+                elif selection == 2:
+                    entry.skip_upload = not entry.skip_upload
+                    self.data.update_source_entry(entry)
+                elif selection == 3:
+                    # await fetch_chapters(rowid)
+                    pass
+                elif selection == 6:
+                    self.data.delete_source_entry(rowid)
+                    break
+
+        await show_initial_menu()

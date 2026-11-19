@@ -27,6 +27,12 @@ class DataProvider(ABC):
         """
 
     @abstractmethod
+    def get_source_entry(self, rowid: int) -> SourceEntry:
+        """
+        Get source entry by rowid.
+        """
+
+    @abstractmethod
     def get_source_entries(
         self,
         source_id: str,
