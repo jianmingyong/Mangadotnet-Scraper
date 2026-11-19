@@ -91,6 +91,19 @@ class HttpResponseError(Exception):
         self.message = message
         self.headers = headers
 
+    def __str__(self) -> str:
+        return f"{self.status}, message={self.message!r}, url={self.request.url}, headers={self.headers!r}"
+
+    def __repr__(self) -> str:
+        args = f"{self.request!r}"
+        if self.status != 0:
+            args += f", status={self.status!r}"
+        if self.message != "":
+            args += f", message={self.message!r}"
+        if self.headers is not None:
+            args += f", headers={self.headers!r}"
+        return f"{type(self).__name__}({args})"
+
 
 class HttpClientProvider(AbstractAsyncContextManager):
     @override

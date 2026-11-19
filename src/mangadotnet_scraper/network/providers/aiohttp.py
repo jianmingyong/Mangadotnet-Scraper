@@ -116,7 +116,7 @@ class ServerRateLimitMiddleware(Middleware):
             response.headers.get("RateLimit-Remaining"),
         )
 
-        if remaining is not None and remaining.isdigit():
+        if remaining is not None and remaining.isnumeric():
             self._remaining_limit = int(remaining)
         else:
             self._remaining_limit = -1
@@ -125,7 +125,7 @@ class ServerRateLimitMiddleware(Middleware):
             "X-RateLimit-Reset", response.headers.get("RateLimit-Reset")
         )
 
-        if reset is not None and reset.isdigit():
+        if reset is not None and reset.isnumeric():
             self._reset = int(reset)
 
             if self._reset > time():
@@ -215,14 +215,15 @@ class RateLimitedMiddleware(Middleware):
             if response.status != self._TOO_MANY_REQUEST_STATUS_CODE:
                 return response
 
-            retry_timer = response.headers.get(self._RETRY_AFTER_HEADER)
-
-            # Common Rate limit headers
             retry_timer = response.headers.get(
-                "X-RateLimit-Reset", response.headers.get("RateLimit-Reset")
+                self._RETRY_AFTER_HEADER,
+                response.headers.get(
+                    "X-RateLimit-Reset",
+                    response.headers.get("RateLimit-Reset"),
+                ),
             )
 
-            if retry_timer is not None and retry_timer.isdigit():
+            if retry_timer is not None and retry_timer.isnumeric():
                 retry_timer = int(retry_timer)
             else:
                 retry_timer = self._retry_wait_duration

@@ -29,12 +29,6 @@ class SpringToonsSourceProvider(BaseSourceProvider):
             base_url="https://springtoons.org",
         )
 
-    async def fetch_listing_html(self, page: int = 1) -> str:
-        return await self.client.get_text(
-            "/explore",
-            params={"type": ["manga", "manhwa", "manhua"], "page": page},
-        )
-
     def search_script(self, tag: Tag) -> bool:
         return (
             tag.name == "script"
@@ -57,7 +51,10 @@ class SpringToonsSourceProvider(BaseSourceProvider):
         has_next_page = True
 
         while has_next_page:
-            html = await self.fetch_listing_html(page)
+            html = await self.get_html(
+                "/explore",
+                params={"type": ["manga", "manhwa", "manhua"], "page": page},
+            )
             soup = BeautifulSoup(html, "html.parser")
 
             script = soup.find(self.search_script)
@@ -101,7 +98,7 @@ class SpringToonsSourceProvider(BaseSourceProvider):
     ) -> Manga:
         new_manga = manga.copy()
 
-        html = await self.client.get_text(manga.link)
+        html = await self.get_html(manga.link)
         soup = BeautifulSoup(html, "html.parser")
 
         script = soup.find(self.search_script)
@@ -189,7 +186,7 @@ class SpringToonsSourceProvider(BaseSourceProvider):
     async def _on_get_page_list(
         self, manga: Manga, chapter: Chapter
     ) -> Sequence[Page]:
-        html = await self.client.get_text(chapter.link)
+        html = await self.get_html(chapter.link)
         soup = BeautifulSoup(html, "html.parser")
 
         script = soup.find(self.search_script)
@@ -220,8 +217,10 @@ class SpringToonsSourceProvider(BaseSourceProvider):
         return pages
 
     @override
-    async def _on_get_image_request(self, page: Page) -> ImageRequest:
-        return ImageRequest(headers={"Referer": f"{self.base_url}/"})
+    def _on_get_image_request(self, page: Page) -> ImageRequest:
+        return ImageRequest(
+            page.link, headers={"Referer": f"{self.base_url}/"}
+        )
 
 
 SourceProvider.register_source(SpringToonsSourceProvider)

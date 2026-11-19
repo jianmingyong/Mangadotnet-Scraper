@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterator
 from typing import Literal
 
-from mangadotnet_scraper.data.entities import SourceEntryEntity
+from mangadotnet_scraper.data.entities import SourceEntry
 
 
 class DataProvider(ABC):
@@ -30,8 +30,12 @@ class DataProvider(ABC):
     def get_source_entries(
         self,
         source_id: str,
-        offset: int = 0,
-        limit: int = -1,
-        order_by: Literal["rowid", "title"] | None = None,
+        order_by: Literal["rowid", "title"] = "rowid",
         order: Literal["ASC", "DESC"] = "ASC",
-    ) -> Sequence[SourceEntryEntity]: ...
+    ) -> Iterator[SourceEntry]:
+        """
+        Get all source entries by source id.
+        """
+
+    @abstractmethod
+    def update_source_entry(self, entry: SourceEntry) -> None: ...

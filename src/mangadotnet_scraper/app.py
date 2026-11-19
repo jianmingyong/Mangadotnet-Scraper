@@ -26,8 +26,8 @@ from rich.rule import Rule
 import mangadotnet_scraper.sources.providers  # noqa: F401
 from mangadotnet_scraper.config import ConfigProvider
 from mangadotnet_scraper.data import DataProvider
-from mangadotnet_scraper.data.entities import SourceEntryEntity
-from mangadotnet_scraper.data.providers import SqliteDataProvider
+from mangadotnet_scraper.data.entities import SourceEntry
+from mangadotnet_scraper.data.providers import CySqliteDataProvider
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import (
     MangaDotNetApi,
@@ -66,7 +66,7 @@ class LoginHandler(MangaDotNetLoginRequestHandler):
 
         otp = await questionary.text(
             "Please enter MangaDotNet OTP (6 digits):",
-            validate=lambda x: len(x) == 6 and cast(str, x).isdigit(),
+            validate=lambda x: len(x) == 6 and cast(str, x).isnumeric(),
         ).ask_async()
 
         return otp
@@ -82,8 +82,9 @@ class App(AbstractAsyncContextManager):
 
     def __init__(self) -> None:
         self.config = JsonConfigProvider()
-        self.data = SqliteDataProvider()
+        self.data = CySqliteDataProvider()
         self.sources = SourceProvider(self.config)
+
         self.mangabaka_api = MangaBakaApi()
         self.mangadotnet_api = MangaDotNetApi(self.config)
 
@@ -98,6 +99,7 @@ class App(AbstractAsyncContextManager):
     async def exit(self) -> None:
         self.config.save()
         self.data.close()
+
         await self.mangabaka_api.close()
         await self.mangadotnet_api.close()
 
@@ -305,9 +307,11 @@ class App(AbstractAsyncContextManager):
             Group(Rule(), total_progress, Rule(), current_progress),
             transient=True,
         ):
-            listing = self.data.get_source_entries(
-                source.source_id, order_by="title"
-            )
+            listing = [
+                *self.data.get_source_entries(
+                    source.source_id, order_by="title"
+                )
+            ]
 
             total_progress_task_id = total_progress.add_task(
                 source.name, total=len(listing)
@@ -316,7 +320,7 @@ class App(AbstractAsyncContextManager):
             semaphore = Semaphore(self.config.fetch_concurrency)
 
             async def fetch_manga_detail_task(
-                source_entry: SourceEntryEntity,
+                source_entry: SourceEntry,
             ) -> None:
                 async with semaphore:
                     task_id = current_progress.add_task(source_entry.title)
@@ -367,6 +371,8 @@ class App(AbstractAsyncContextManager):
                         await self.update_chapters(
                             source_entry, manga.chapters
                         )
+
+                        self.data.update_source_entry(source_entry)
                     except Exception:
                         total_progress.print(
                             f"Error fetching {source_entry.title}"
@@ -399,7 +405,7 @@ class App(AbstractAsyncContextManager):
                 )
 
     async def update_chapters(
-        self, source_entry: SourceEntryEntity, chapters: Sequence[Chapter]
+        self, source_entry: SourceEntry, chapters: Sequence[Chapter]
     ) -> None:
         if source_entry.mangadotnet_id is None:
             return
@@ -421,14 +427,17 @@ class App(AbstractAsyncContextManager):
             match chapter.type:
                 case "chapter":
                     for mangadotnet_chapter in mangadotnet_chapters:
-                        if (
-                            mangadotnet_chapter.get("language")
-                            == new_chapter.language
-                            and mangadotnet_chapter.get("chapter_number")
-                            == new_chapter.chapter_number
-                        ):
+                        if mangadotnet_chapter.get(
+                            "language"
+                        ) == new_chapter.get(
+                            "language"
+                        ) and mangadotnet_chapter.get(
+                            "chapter_number"
+                        ) == new_chapter.get("chapter_number"):
                             for group in mangadotnet_chapter.get("groups", []):
-                                if group.get("name") == new_chapter.group:
+                                if group.get("name") == new_chapter.get(
+                                    "group"
+                                ):
                                     found = True
                                     break
 
@@ -437,21 +446,24 @@ class App(AbstractAsyncContextManager):
 
                 case "volume":
                     for mangadotnet_volume in mangadotnet_volumes:
-                        if (
-                            mangadotnet_volume.get("language")
-                            == new_chapter.language
-                            and mangadotnet_volume.get("volume_number")
-                            == new_chapter.volume_number
-                        ):
+                        if mangadotnet_volume.get(
+                            "language"
+                        ) == new_chapter.get(
+                            "language"
+                        ) and mangadotnet_volume.get(
+                            "volume_number"
+                        ) == new_chapter.get("volume_number"):
                             for group in mangadotnet_volume.get("groups", []):
-                                if group.get("name") == new_chapter.group:
+                                if group.get("name") == new_chapter.get(
+                                    "group"
+                                ):
                                     found = True
                                     break
 
                         if found:
                             break
 
-            new_chapter.is_uploaded = found
+            new_chapter["is_uploaded"] = found
             new_chapters.append(new_chapter)
 
         source_entry.chapters = new_chapters

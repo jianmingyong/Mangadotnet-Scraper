@@ -132,7 +132,8 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                     raise SourceError("Unable to get chapter title")
 
                 title_match = re.search(
-                    "Chapter (\\d+\\.\\d+|\\d+)", chapter_title
+                    "Chapter (\\d+\\.\\d+|\\d+)",
+                    chapter_title.replace("O", "0"),
                 )
 
                 if title_match is None:

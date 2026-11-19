@@ -647,6 +647,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         async with await self._client.post(
             "/api/manga/fetch-mangabaka",
             json={"url": f"https://mangabaka.org/{mangabaka_id}"},
+            headers={"Origin": self._BASE_URL},
         ) as response:
             if response.status == 409:
                 json: MangaDotNetFetchMangaBaka = await response.json()
@@ -735,6 +736,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         async with await self._client.post(
             "/api/tus/",
             headers={
+                "Origin": self._BASE_URL,
                 "Tus-Resumable": self._TUS_VERSION,
                 "Upload-Length": f"{file_size:d}",
                 "Upload-Metadata": self._parse_metadata(metadata.to_dict()),
@@ -782,6 +784,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
                 async with await self._client.patch(
                     location,
                     headers={
+                        "Origin": self._BASE_URL,
                         "Content-Type": "application/offset+octet-stream",
                         "Tus-Resumable": self._TUS_VERSION,
                         "Upload-Offset": f"{offset}",
@@ -863,6 +866,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
             async with await self._client.post(
                 "/api/manga/fetch-mangabaka",
                 json={"url": f"https://mangabaka.org/manga/{id}"},
+                headers={"Origin": self._BASE_URL},
             ) as response:
                 response.raise_for_status()
                 return await response.json()
@@ -889,7 +893,9 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         ) -> MangaDotNetCreateFromMangaBakaResponse:
             form_data = FormData(parse_json(json), default_to_multipart=True)
             async with await self._client.post(
-                "/api/manga/create-from-mangabaka", data=form_data
+                "/api/manga/create-from-mangabaka",
+                data=form_data,
+                headers={"Origin": self._BASE_URL},
             ) as response:
                 response.raise_for_status()
                 return await response.json()
