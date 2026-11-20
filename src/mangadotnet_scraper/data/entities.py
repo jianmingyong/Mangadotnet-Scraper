@@ -1,13 +1,13 @@
 from typing import Any, Literal, TypedDict
 
 from peewee import (
-    AutoField,
     BooleanField,
     IntegerField,
     JSONField,
     Model,
     TextField,
 )
+from playhouse.sqlite_ext import RowIDField
 
 from mangadotnet_scraper.sources.base import Chapter, Manga
 
@@ -28,7 +28,7 @@ class Source(Model):
     version = IntegerField(default=1)
 
 
-def default_list() -> Any:
+def _default_list() -> Any:
     return []
 
 
@@ -40,7 +40,7 @@ class SourceEntry(Model):
             (("source_id", "link"), True),
         )
 
-    rowid = AutoField(primary_key=True)
+    rowid = RowIDField()
     source_id = TextField()
     manga_id = TextField()
     title = TextField()
@@ -50,7 +50,7 @@ class SourceEntry(Model):
     mangadotnet_id = IntegerField(null=True)
     manual_mapping_override = BooleanField(default=False)
     skip_upload = BooleanField(default=False)
-    chapters = JSONField(default=default_list)
+    chapters = JSONField(default=_default_list)
 
     def to_manga(self) -> Manga:
         return Manga(
@@ -94,6 +94,7 @@ class SourceEntry(Model):
             "title": target_chapter.title,
             "link": target_chapter.link,
             "is_uploaded": False,
+            "skip_upload": False,
         }
 
 
@@ -107,3 +108,4 @@ class SourceEntryChapter(TypedDict):
     title: str
     link: str
     is_uploaded: bool
+    skip_upload: bool

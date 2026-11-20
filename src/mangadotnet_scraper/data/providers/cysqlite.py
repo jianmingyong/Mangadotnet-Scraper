@@ -152,4 +152,4 @@ class CySqliteDataProvider(DataProvider):
     @override
     def update_source_entry(self, entry: SourceEntry) -> None:
         with self.database.atomic():
-            entry.save()
+            entry.save(only=entry.dirty_fields)

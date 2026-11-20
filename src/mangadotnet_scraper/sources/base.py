@@ -331,6 +331,15 @@ class BaseSourceProvider(AbstractAsyncContextManager):
             raise SourceError("Error fetching image request") from error
 
     @final
+    @retryable_client_method
+    async def download_image(self, request: ImageRequest) -> bytes:
+        async with await self.client.get(
+            request.url, headers=request.headers, cookies=request.cookies
+        ) as response:
+            response.raise_for_status()
+            return await response.read()
+
+    @final
     async def process_page_image(self, image: bytes, page: Page) -> bytes:
         try:
             return await self._on_process_page_image(image, page)

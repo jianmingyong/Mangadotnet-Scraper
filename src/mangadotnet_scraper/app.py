@@ -1,32 +1,40 @@
 import logging
 from asyncio import Semaphore, TaskGroup
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 from contextlib import AbstractAsyncContextManager
+from io import BytesIO
 from typing import (
     Final,
     Self,
     cast,
     override,
 )
+from zipfile import ZIP_DEFLATED, ZipFile
 
+import pillow_jxl  # noqa: F401
 import questionary
+from PIL import Image
 from questionary import Choice
 from rich import get_console
 from rich.console import Group
 from rich.live import Live
 from rich.progress import (
     BarColumn,
+    DownloadColumn,
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TaskProgressColumn,
     TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
 )
 from rich.rule import Rule
 
-import mangadotnet_scraper.sources.providers  # noqa: F401
 from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.config.providers import JsonConfigProvider
 from mangadotnet_scraper.data import DataProvider
-from mangadotnet_scraper.data.entities import SourceEntry
+from mangadotnet_scraper.data.entities import SourceEntry, SourceEntryChapter
 from mangadotnet_scraper.data.providers import CySqliteDataProvider
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import (
@@ -35,9 +43,8 @@ from mangadotnet_scraper.mangadotnet_api import (
 )
 from mangadotnet_scraper.network import HttpResponseError
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
-from mangadotnet_scraper.sources.base import Chapter
-
-from .config.providers import JsonConfigProvider
+from mangadotnet_scraper.sources.base import Chapter, Page
+from mangadotnet_scraper.sources.providers import *
 
 
 class LoginHandler(MangaDotNetLoginRequestHandler):
@@ -253,7 +260,26 @@ class App(AbstractAsyncContextManager):
 
                 case 5:
                     # Upload
-                    pass
+                    selection = await questionary.select(
+                        "Which Source(s) to Upload",
+                        choices=[
+                            Choice("All", -1),
+                            *self.generate_choices("Upload"),
+                            Choice("Back", -2),
+                        ],
+                    ).ask_async()
+
+                    if selection is None or selection == -2:
+                        continue
+                    elif selection == -1:
+                        for source in self.sources.get_enabled_sources():
+                            async with source:
+                                await self.upload_chapters(source)
+                    else:
+                        async with self.sources.get_source(
+                            selection
+                        ) as source:
+                            await self.upload_chapters(source)
 
                 case 6:
                     # Settings
@@ -432,66 +458,77 @@ class App(AbstractAsyncContextManager):
     async def update_chapters(
         self, source_entry: SourceEntry, chapters: Sequence[Chapter]
     ) -> None:
-        if source_entry.mangadotnet_id is None:
-            return
-
         new_chapters = []
 
-        mangadotnet_chapters = await self.mangadotnet_api.get_chapters_by_id(
-            source_entry.mangadotnet_id
-        )
+        if source_entry.mangadotnet_id is None:
+            for chapter in chapters:
+                new_chapter = source_entry.get_chapter(chapter)
+                new_chapter["is_uploaded"] = False
+                new_chapters.append(new_chapter)
 
-        mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
-            source_entry.mangadotnet_id
-        )
+            source_entry.chapters = new_chapters
+        else:
+            mangadotnet_chapters = (
+                await self.mangadotnet_api.get_chapters_by_id(
+                    source_entry.mangadotnet_id
+                )
+            )
 
-        for chapter in chapters:
-            new_chapter = source_entry.get_chapter(chapter)
-            found = False
+            mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
+                source_entry.mangadotnet_id
+            )
 
-            match chapter.type:
-                case "chapter":
-                    for mangadotnet_chapter in mangadotnet_chapters:
-                        if mangadotnet_chapter.get(
-                            "language"
-                        ) == new_chapter.get(
-                            "language"
-                        ) and mangadotnet_chapter.get(
-                            "chapter_number"
-                        ) == new_chapter.get("chapter_number"):
-                            for group in mangadotnet_chapter.get("groups", []):
-                                if group.get("name") == new_chapter.get(
-                                    "group"
+            for chapter in chapters:
+                new_chapter = source_entry.get_chapter(chapter)
+                found = False
+
+                match chapter.type:
+                    case "chapter":
+                        for mangadotnet_chapter in mangadotnet_chapters:
+                            if mangadotnet_chapter.get(
+                                "language"
+                            ) == new_chapter.get(
+                                "language"
+                            ) and mangadotnet_chapter.get(
+                                "chapter_number"
+                            ) == new_chapter.get("chapter_number"):
+                                for group in mangadotnet_chapter.get(
+                                    "groups", []
                                 ):
-                                    found = True
-                                    break
+                                    if group.get("name") == new_chapter.get(
+                                        "group"
+                                    ):
+                                        found = True
+                                        break
 
-                        if found:
-                            break
+                            if found:
+                                break
 
-                case "volume":
-                    for mangadotnet_volume in mangadotnet_volumes:
-                        if mangadotnet_volume.get(
-                            "language"
-                        ) == new_chapter.get(
-                            "language"
-                        ) and mangadotnet_volume.get(
-                            "volume_number"
-                        ) == new_chapter.get("volume_number"):
-                            for group in mangadotnet_volume.get("groups", []):
-                                if group.get("name") == new_chapter.get(
-                                    "group"
+                    case "volume":
+                        for mangadotnet_volume in mangadotnet_volumes:
+                            if mangadotnet_volume.get(
+                                "language"
+                            ) == new_chapter.get(
+                                "language"
+                            ) and mangadotnet_volume.get(
+                                "volume_number"
+                            ) == new_chapter.get("volume_number"):
+                                for group in mangadotnet_volume.get(
+                                    "groups", []
                                 ):
-                                    found = True
-                                    break
+                                    if group.get("name") == new_chapter.get(
+                                        "group"
+                                    ):
+                                        found = True
+                                        break
 
-                        if found:
-                            break
+                            if found:
+                                break
 
-            new_chapter["is_uploaded"] = found
-            new_chapters.append(new_chapter)
+                new_chapter["is_uploaded"] = found
+                new_chapters.append(new_chapter)
 
-        source_entry.chapters = new_chapters
+            source_entry.chapters = new_chapters
 
     async def show_settings_menu(self) -> None:
         while True:
@@ -536,11 +573,13 @@ class App(AbstractAsyncContextManager):
     async def manual_source_editing(self, source: BaseSourceProvider) -> None:
         async def show_initial_menu() -> None:
             while True:
-                entries = [*self.data.get_source_entries(source.source_id)]
+                entries = [
+                    *self.data.get_source_entries(source.source_id, "title")
+                ]
 
                 choices = [
                     Choice(
-                        f"[{entry.rowid}] [{entry.mangadotnet_id if entry.mangadotnet_id is not None else 'NULL'}] {entry.title} [+{len(entry.alt_titles.splitlines()) if entry.alt_titles is not None else 0} Alt Titles]",
+                        f"[{entry.mangadotnet_id or 'NULL'}] {entry.title}",
                         entry.rowid,
                     )
                     for entry in entries
@@ -565,9 +604,11 @@ class App(AbstractAsyncContextManager):
             while True:
                 entry = self.data.get_source_entry(rowid)
 
-                print(f"[{rowid}] {entry.title}")
+                get_console().clear()
+                get_console().rule("Manual Source Entry Editor")
+
                 print("Manga Id:", entry.manga_id)
-                print("Link:", entry.link)
+                print("Title:", entry.title)
                 print("Alt Titles:")
 
                 if entry.alt_titles is None:
@@ -576,48 +617,470 @@ class App(AbstractAsyncContextManager):
                     for item in entry.alt_titles.splitlines():
                         print(item)
 
-                print(
-                    "MangaBaka Id:",
-                    entry.mangabaka_id
-                    if entry.mangabaka_id is not None
-                    else "NULL",
-                )
-                print(
-                    "MangaDotNet Id:",
-                    entry.mangadotnet_id
-                    if entry.mangadotnet_id is not None
-                    else "NULL",
-                )
+                print("Link:", entry.link)
 
+                print("MangaBaka Id:", entry.mangabaka_id or "NULL")
+                print("MangaDot Id:", entry.mangadotnet_id or "NULL")
                 print("Skip Upload:", entry.skip_upload)
+
+                can_modify = None
+                can_upload = None
+
+                if entry.mangadotnet_id is None:
+                    can_upload = "Cannot upload when MangaDot Id is NULL"
+
+                if len(entry.chapters) == 0:
+                    can_modify = "No chapter available to modify"
+                    can_upload = "No chapter available to upload"
 
                 selection = await questionary.select(
                     "What would you like to do?",
                     choices=[
-                        Choice("Update Mapping", 1),
-                        Choice("Enable/Disable Upload", 2),
-                        Choice("Fetch Chapters", 3),
-                        # Choice("Modify Chapter", 4),
-                        # Choice("Upload", 5),
-                        Choice("Delete Entry", 6),
+                        Choice("Update Entry", 1),
+                        Choice("Delete Entry", 2),
+                        Choice("Update Mapping", 3),
+                        Choice("Enable/Disable Upload", 4),
+                        Choice("Modify Chapter", 5, disabled=can_modify),
+                        Choice("Upload", 6, disabled=can_upload),
                         Choice("Back", -1),
                     ],
                     use_shortcuts=True,
                 ).ask_async()
 
-                if selection is None or selection == -1:
-                    break
-                elif selection == 1:
-                    # await show_update_mapping(rowid)
-                    pass
-                elif selection == 2:
-                    entry.skip_upload = not entry.skip_upload
-                    self.data.update_source_entry(entry)
-                elif selection == 3:
-                    # await fetch_chapters(rowid)
-                    pass
-                elif selection == 6:
-                    self.data.delete_source_entry(rowid)
-                    break
+                match selection:
+                    case 1:
+                        # Update Entry
+                        await update_entry(entry)
+
+                    case 2:
+                        # Delete Entry
+                        self.data.delete_source_entry(rowid)
+                        break
+
+                    case 3:
+                        # Update Mapping
+                        await update_mapping(entry)
+
+                    case 4:
+                        # Enable/Disable Upload
+                        entry.skip_upload = not entry.skip_upload
+                        self.data.update_source_entry(entry)
+
+                    case _:
+                        break
+
+        async def update_mapping(entry: SourceEntry) -> None:
+            selection = await questionary.select(
+                "What would you like to do?",
+                choices=[
+                    Choice("Try auto mapping", 1),
+                    Choice("Manual mapping (via MangaBaka)", 2),
+                    Choice("Manual mapping (via MangaDotNet)", 3),
+                    Choice("Back", -1),
+                ],
+                use_shortcuts=True,
+            ).ask_async()
+
+            def check_for_int_or_skip(input: str) -> bool:
+                return input.isnumeric()
+
+            match selection:
+                case 1:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn(
+                            "Fetching {task.fields[task]}", markup=False
+                        ),
+                        transient=True,
+                    ) as progress:
+                        task = progress.add_task(
+                            "", total=None, task="MangaBaka Entry"
+                        )
+
+                        titles = [entry.title]
+
+                        if entry.alt_titles is not None:
+                            titles.extend(entry.alt_titles.splitlines())
+
+                        if entry.mangabaka_id is None:
+                            entry.mangabaka_id = (
+                                await self.mangabaka_api.get_id_by_title(
+                                    titles
+                                )
+                            )
+
+                        progress.update(task, task="MangaDotNet Entry")
+
+                        if entry.mangadotnet_id is None:
+                            entry.mangadotnet_id = (
+                                await self.mangadotnet_api.get_id_by_title(
+                                    titles
+                                )
+                            )
+
+                            if (
+                                entry.mangadotnet_id is None
+                                and entry.mangabaka_id is not None
+                            ):
+                                entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                    entry.mangabaka_id
+                                )
+
+                                if entry.mangadotnet_id is None:
+                                    entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                        entry.mangabaka_id
+                                    )
+
+                case 2:
+                    while True:
+                        id = await questionary.text(
+                            "Enter MangaBaka Id (0 to cancel):",
+                            validate=check_for_int_or_skip,
+                        ).ask_async()
+
+                        if id is None:
+                            break
+                        else:
+                            id = int(id)
+
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn(
+                                "Fetching {task.fields[task]}", markup=False
+                            ),
+                            transient=True,
+                        ) as progress:
+                            task = progress.add_task(
+                                "", total=None, task="MangaBaka Entry"
+                            )
+
+                            try:
+                                await self.mangabaka_api.get_series_by_id(id)
+                            except HttpResponseError as error:
+                                progress.print(
+                                    error, markup=False, highlight=False
+                                )
+                                continue
+
+                            progress.update(task, task="MangaDotNet Entry")
+
+                            try:
+                                entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                    id
+                                )
+
+                                if entry.mangadotnet_id is None:
+                                    entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                        id
+                                    )
+                            except HttpResponseError:
+                                progress.print(
+                                    "Unable to create mangadotnet id. Please try again later"
+                                )
+                                break
+
+                            entry.manual_mapping_override = True
+
+                case 3:
+                    while True:
+                        id = await questionary.text(
+                            "Enter MangaDotNet Id (0 to cancel):",
+                            validate=check_for_int_or_skip,
+                        ).ask_async()
+
+                        if id is None:
+                            break
+                        else:
+                            id = int(id)
+
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn(
+                                "Fetching {task.fields[task]}", markup=False
+                            ),
+                            transient=True,
+                        ) as progress:
+                            task = progress.add_task(
+                                "", total=None, task="MangaDotNet Entry"
+                            )
+
+                            try:
+                                await self.mangadotnet_api.get_entry_by_id(id)
+                                entry.mangadotnet_id = id
+                            except HttpResponseError:
+                                progress.print(
+                                    "Unable to find mangadotnet entry"
+                                )
+                                break
+
+                            entry.manual_mapping_override = True
+
+                case _:
+                    return
+
+            self.data.update_source_entry(entry)
+
+        async def update_entry(entry: SourceEntry) -> None:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("Updating {task.description}"),
+                transient=True,
+            ) as progress:
+                progress.add_task(entry.title, total=None)
+
+                manga = await source.get_manga_update(entry.to_manga())
+
+                entry.manga_id = manga.id
+                entry.title = manga.title
+                entry.alt_titles = "\n".join(manga.alt_titles)
+                entry.link = manga.link
+
+                await self.update_chapters(entry, manga.chapters)
+                self.data.update_source_entry(entry)
 
         await show_initial_menu()
+
+    async def upload_chapters(self, source: BaseSourceProvider) -> None:
+        total_progress = Progress(
+            TextColumn("Upload {task.description} Overall"),
+            BarColumn(bar_width=None),
+            MofNCompleteColumn(),
+        )
+        current_progress_title = Progress(
+            TextColumn("{task.fields[status]} ({task.fields[count]})")
+        )
+
+        current_progress = Progress(
+            SpinnerColumn(),
+            TextColumn(
+                "[{task.fields[chapter]}] {task.fields[status]}", markup=False
+            ),
+            BarColumn(),
+            TaskProgressColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+        )
+
+        group_id_cache: MutableMapping[str, int] = {}
+
+        with Live(
+            Group(
+                Rule(),
+                total_progress,
+                Rule(),
+                current_progress_title,
+                current_progress,
+            ),
+            transient=True,
+        ):
+            entries_to_upload = []
+
+            for entry in self.data.get_source_entries(source.source_id):
+                for chapter in entry.chapters:
+                    chapter: SourceEntryChapter
+                    if (
+                        not chapter["skip_upload"]
+                        and not chapter["is_uploaded"]
+                    ):
+                        entries_to_upload.append(entry)
+                        break
+
+            total_progress_task = total_progress.add_task(
+                source.name, total=len(entries_to_upload)
+            )
+            current_progress_title_task = current_progress_title.add_task(
+                "", status="", count=0
+            )
+
+            for entry in entries_to_upload:
+                current_progress_title.update(
+                    current_progress_title_task,
+                    status=f"Uploading: {entry.title}",
+                    count=0,
+                )
+
+                chapters_to_upload = []
+
+                for chapter in entry.chapters:
+                    chapter: SourceEntryChapter
+                    if (
+                        not chapter["skip_upload"]
+                        and not chapter["is_uploaded"]
+                    ) and (
+                        chapter["type"] == "chapter"
+                        and chapter["chapter_number"] is not None
+                        or chapter["type"] == "volume"
+                        and chapter["volume_number"] is not None
+                    ):
+                        chapters_to_upload.append(chapter)
+
+                current_progress_title.update(
+                    current_progress_title_task, count=len(chapters_to_upload)
+                )
+
+                upload_semaphore = Semaphore(self.config.upload_concurrency)
+
+                async def upload_task(
+                    semaphore: Semaphore,
+                    entry: SourceEntry,
+                    chapter: SourceEntryChapter,
+                ) -> None:
+                    try:
+                        async with semaphore:
+                            match chapter["type"]:
+                                case "chapter":
+                                    chapter_text = f"{entry.mangadotnet_id}:{chapter['language']}:{chapter['chapter_number']} [{chapter['group']}]"
+
+                                case "volume":
+                                    chapter_text = f"{entry.mangadotnet_id}:{chapter['language']}:{chapter['volume_number']} [{chapter['group']}]"
+
+                            task_id = current_progress.add_task(
+                                "",
+                                start=False,
+                                total=None,
+                                chapter=chapter_text,
+                                status="Fetching Manga Pages...",
+                            )
+
+                            pages = await source.get_page_list(
+                                entry.to_manga(), Chapter.from_dict(chapter)
+                            )
+
+                            if len(pages) == 0:
+                                match chapter["type"]:
+                                    case "chapter":
+                                        logging.getLogger(__name__).exception(
+                                            "Fetch Failure [%s]: %s:%s:%s %s [%s]",
+                                            entry.rowid,
+                                            entry.mangadotnet_id,
+                                            chapter["language"],
+                                            chapter["chapter_number"],
+                                            chapter["title"],
+                                            chapter["group"],
+                                        )
+
+                                    case "volume":
+                                        logging.getLogger(__name__).exception(
+                                            "Fetch Failure [%s]: %s:%s:%s %s [%s]",
+                                            entry.rowid,
+                                            entry.mangadotnet_id,
+                                            chapter["language"],
+                                            chapter["volume_number"],
+                                            chapter["title"],
+                                            chapter["group"],
+                                        )
+                                return
+
+                            current_progress.update(
+                                task_id,
+                                total=len(pages),
+                                status="Downloading Image",
+                            )
+
+                            zip_buffer = BytesIO()
+                            has_error = False
+
+                            with ZipFile(
+                                zip_buffer, "a", ZIP_DEFLATED, compresslevel=9
+                            ) as zip_file:
+                                download_semaphore = Semaphore(
+                                    self.config.download_concurrency
+                                )
+
+                                async def download_image_task(
+                                    page: Page,
+                                ) -> None:
+                                    async with download_semaphore:
+                                        image = await source.download_image(
+                                            source.get_image_request(page)
+                                        )
+                                        image = (
+                                            await source.process_page_image(
+                                                image, page
+                                            )
+                                        )
+
+                                        raw_image = Image.open(BytesIO(image))
+
+                                        zip_file.writestr(
+                                            f"{page.page:03d}.{raw_image.format}",
+                                            image,
+                                        )
+                                        current_progress.advance(task_id)
+
+                            try:
+                                async with TaskGroup() as group:
+                                    for page in pages:
+                                        group.create_task(
+                                            download_image_task(page)
+                                        )
+                            except* Exception:  # noqa: BLE001
+                                has_error = True
+
+                            if has_error:
+                                match chapter["type"]:
+                                    case "chapter":
+                                        logging.getLogger(__name__).exception(
+                                            "Download Failure [%s]: %s:%s:%s %s [%s]",
+                                            entry.rowid,
+                                            entry.mangadotnet_id,
+                                            chapter["language"],
+                                            chapter["chapter_number"],
+                                            chapter["title"],
+                                            chapter["group"],
+                                        )
+
+                                    case "volume":
+                                        logging.getLogger(__name__).exception(
+                                            "Download Failure [%s]: %s:%s:%s %s [%s]",
+                                            entry.rowid,
+                                            entry.mangadotnet_id,
+                                            chapter["language"],
+                                            chapter["volume_number"],
+                                            chapter["title"],
+                                            chapter["group"],
+                                        )
+                                return
+
+                            zip_file_size = zip_buffer.tell()
+
+                            current_progress.update(
+                                task_id,
+                                completed=0,
+                                total=zip_file_size,
+                                status="Preparing Upload (1)",
+                            )
+                    except Exception:
+                        match chapter["type"]:
+                            case "chapter":
+                                logging.getLogger(__name__).exception(
+                                    "Upload Failure [%s]: %s:%s:%s %s [%s]",
+                                    entry.rowid,
+                                    entry.mangadotnet_id,
+                                    chapter["language"],
+                                    chapter["chapter_number"],
+                                    chapter["title"],
+                                    chapter["group"],
+                                )
+
+                            case "volume":
+                                logging.getLogger(__name__).exception(
+                                    "Upload Failure [%s]: %s:%s:%s %s [%s]",
+                                    entry.rowid,
+                                    entry.mangadotnet_id,
+                                    chapter["language"],
+                                    chapter["volume_number"],
+                                    chapter["title"],
+                                    chapter["group"],
+                                )
+                    finally:
+                        current_progress.remove_task(task_id)
+
+                async with TaskGroup() as group:
+                    for chapter in chapters_to_upload:
+                        group.create_task(
+                            upload_task(upload_semaphore, entry, chapter)
+                        )
+
+            total_progress.print(f"Done upload {source.name}")

@@ -92,7 +92,7 @@ class HttpResponseError(Exception):
         self.headers = headers
 
     def __str__(self) -> str:
-        return f"{self.status}, message={self.message!r}, url={self.request.url}, headers={self.headers!r}"
+        return f"{self.status}, message={self.message}, url={self.request.url}, headers={self.headers!r}"
 
     def __repr__(self) -> str:
         args = f"{self.request!r}"
