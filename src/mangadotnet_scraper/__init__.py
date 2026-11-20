@@ -1,43 +1,11 @@
 import asyncio
 import logging
 import sys
-from asyncio import Semaphore, sleep
-from asyncio.taskgroups import TaskGroup
-from collections.abc import Sequence
-from io import BytesIO
-from time import asctime, gmtime, monotonic
-from typing import Any, cast
-from zipfile import ZIP_DEFLATED, ZipFile
-
-import questionary
-from aiohttp import ClientResponseError
-from questionary import Choice
-from rich import get_console
-from rich.console import Group
-from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-    TransferSpeedColumn,
-)
-from rich.rule import Rule
 
 if sys.platform == "linux":
     import uvloop
 
 from mangadotnet_scraper.app import App
-
-# from mangadotnet_scraper.mangabaka_api import MangaBakaApi
-# from mangadotnet_scraper.mangadotnet_api import MangaDotNetApi
-# from mangadotnet_scraper.sources.base import BaseModule, FetchError
-# from mangadotnet_scraper.sources.manager import ModuleManager
-# from mangadotnet_scraper.utilities import dict_get_recursive
 
 
 def initialize() -> None:
@@ -54,11 +22,9 @@ def initialize() -> None:
             uvloop.run(initialize_app())
         else:
             asyncio.run(initialize_app())
-    except KeyboardInterrupt, SystemExit:
-        pass
-    except Exception as error:
-        print(error)
+    except Exception:
         logging.getLogger(__name__).exception("Unhandled exception caught")
+        raise
 
 
 async def initialize_app() -> None:
@@ -66,1540 +32,359 @@ async def initialize_app() -> None:
         await app.run()
 
 
-async def initialize_async() -> None:
-    get_console().rule("MangaDotNet Scraper and Uploader")
-
-    config = MangaDotNetScraperConfig("config.json")
-    config.load()
-
-    with (
-        MangaDotNetScraperData(config) as data,
-        ModuleManager(config, data) as manager,
-    ):
-        async with (
-            MangaBakaApi() as mangabaka_api,
-            MangaDotNetApi(config) as mangadotnet_api,
-        ):
-
-            def generate_choices(text: str) -> Sequence[Choice]:
-                return [
-                    Choice(f"{text} {module.display_name}", module.module_id)
-                    for module in manager.get_enabled_modules()
-                ]
-
-            try:
-                while True:
-                    selection = await questionary.select(
-                        "What would you like to do?",
-                        choices=[
-                            Choice("Fetch Listing", 1),
-                            Choice("Fetch Listing Details With Mapping", 2),
-                            Choice("Fetch Listing Details Without Mapping", 3),
-                            Choice(
-                                "Manual Source Mapping (Only Unmapped Entries)",
-                                5,
-                            ),
-                            Choice("Manual Source Editing", 7),
-                            Choice("Upload", 4),
-                            Choice("Settings", 6),
-                            Choice("Quit", -1),
-                        ],
-                        use_shortcuts=True,
-                    ).ask_async()
-
-                    if selection is None or selection == -1:
-                        break
-                    elif selection == 1:
-                        selection = await questionary.select(
-                            "Which Module(s) to Fetch Listing",
-                            choices=[
-                                Choice("All", -1),
-                                *generate_choices("Fetch"),
-                                Choice("Back", -2),
-                            ],
-                        ).ask_async()
-
-                        if selection is None or selection == -2:
-                            continue
-                        elif selection == -1:
-                            for module in manager.get_enabled_modules():
-                                async with module:
-                                    await fetch_module_listing(module, data)
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await fetch_module_listing(module, data)
-                    elif selection == 2:
-                        selection = await questionary.select(
-                            "Which Module(s) to Fetch Listing Details With Mapping",
-                            choices=[
-                                Choice("All", -1),
-                                *generate_choices("Fetch"),
-                                Choice("Back", -2),
-                            ],
-                        ).ask_async()
-
-                        if selection is None or selection == -2:
-                            continue
-                        elif selection == -1:
-                            for module in manager.get_enabled_modules():
-                                async with module:
-                                    await fetch_module_listing_details(
-                                        module,
-                                        data,
-                                        mangabaka_api,
-                                        mangadotnet_api,
-                                    )
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await fetch_module_listing_details(
-                                    module,
-                                    data,
-                                    mangabaka_api,
-                                    mangadotnet_api,
-                                )
-                    elif selection == 3:
-                        selection = await questionary.select(
-                            "Which Module(s) to Fetch Listing Details Without Mapping",
-                            choices=[
-                                Choice("All", -1),
-                                *generate_choices("Fetch"),
-                                Choice("Back", -2),
-                            ],
-                        ).ask_async()
-
-                        if selection is None or selection == -2:
-                            continue
-                        elif selection == -1:
-                            for module in manager.get_enabled_modules():
-                                async with module:
-                                    await fetch_module_listing_details(
-                                        module,
-                                        data,
-                                        mangabaka_api,
-                                        mangadotnet_api,
-                                        skip_mapping=True,
-                                    )
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await fetch_module_listing_details(
-                                    module,
-                                    data,
-                                    mangabaka_api,
-                                    mangadotnet_api,
-                                    skip_mapping=True,
-                                )
-                    elif selection == 4:
-                        selection = await questionary.select(
-                            "Which Module(s) to Upload",
-                            choices=[
-                                Choice("All", -1),
-                                *generate_choices("Upload"),
-                                Choice("Back", -2),
-                            ],
-                        ).ask_async()
-
-                        if selection is None or selection == -2:
-                            continue
-                        elif selection == -1:
-                            for module in manager.get_enabled_modules():
-                                async with module:
-                                    await upload_chapters(
-                                        module,
-                                        config,
-                                        data,
-                                        mangadotnet_api,
-                                    )
-                        else:
-                            async with manager.get_module(selection) as module:
-                                await upload_chapters(
-                                    module, config, data, mangadotnet_api
-                                )
-                    elif selection == 5:
-                        while True:
-                            selection = await questionary.select(
-                                "Which Module(s) to Manual Mapping",
-                                choices=[
-                                    *generate_choices("Map"),
-                                    Choice("Back", -1),
-                                ],
-                            ).ask_async()
-
-                            if selection is None or selection == -1:
-                                break
-                            else:
-                                async with manager.get_module(
-                                    selection
-                                ) as module:
-                                    await manual_entry_matching(
-                                        module,
-                                        data,
-                                        mangabaka_api,
-                                        mangadotnet_api,
-                                    )
-                    elif selection == 6:
-                        selection = await questionary.select(
-                            "What would you like to do?",
-                            choices=[
-                                Choice("Configure Modules", 1),
-                                Choice("Back", -1),
-                            ],
-                            use_shortcuts=True,
-                        ).ask_async()
-
-                        if selection is None or selection == -1:
-                            continue
-                        elif selection == 1:
-                            choices = []
-
-                            for module_id, module in manager.get_modules():
-                                choices.append(
-                                    Choice(
-                                        f"{module.display_name}",
-                                        module_id,
-                                        checked=module_id
-                                        in config.enabled_sources,
-                                        description=f"{module.display_name} | Language: {module.language} | Version: {module.version}",
-                                    )
-                                )
-
-                            selection = await questionary.checkbox(
-                                "Choose modules you would like to enable:",
-                                choices=choices,
-                                use_jk_keys=False,
-                                use_search_filter=True,
-                                show_description=True,
-                            ).ask_async()
-
-                            if selection is None:
-                                continue
-
-                            config.enabled_sources = selection
-                    elif selection == 7:
-                        while True:
-                            selection = await questionary.select(
-                                "Which Module(s) to Manual Mapping",
-                                choices=[
-                                    *generate_choices(""),
-                                    Choice("Back", -1),
-                                ],
-                                use_shortcuts=True,
-                            ).ask_async()
-
-                            if selection is None or selection == -1:
-                                break
-                            else:
-                                async with manager.get_module(
-                                    selection
-                                ) as module:
-                                    await manual_source_editing(
-                                        module,
-                                        data,
-                                        mangabaka_api,
-                                        mangadotnet_api,
-                                    )
-            finally:
-                config.save()
-
-
-async def fetch_module_listing_details(
-    module: BaseModule,
-    data: MangaDotNetScraperData,
-    mangabaka_api: MangaBakaApi,
-    mangadotnet_api: MangaDotNetApi,
-    map_only_null: bool = True,
-    skip_mapping: bool = False,
-) -> None:
-    total_progress = Progress(
-        TextColumn("Fetching {task.description} Details"),
-        BarColumn(bar_width=None),
-        MofNCompleteColumn(),
-    )
-
-    current_progress = Progress(
-        SpinnerColumn(),
-        TextColumn("Fetching: {task.description}", markup=False),
-    )
-
-    with Live(
-        Group(Rule(), total_progress, Rule(), current_progress), transient=True
-    ):
-        listing_count, listing = data.get_module_listing(
-            module.module_id,
-            [
-                "rowid",
-                "manga_id",
-                "link",
-                "title",
-                "mangabaka_id",
-                "mangadotnet_id",
-                "manual_override",
-            ],
-            order_by="title",
-        )
-        total_progress_task_id = total_progress.add_task(
-            module.display_name, total=listing_count
-        )
-
-        semaphore = Semaphore(module.fetch_concurrency)
-
-        async def fetch_manga_detail_task(
-            rowid: int,
-            manga_id: str,
-            link: str,
-            title: str,
-            mangabaka_id: int | None,
-            mangadotnet_id: int | None,
-            manual_override: bool,
-        ) -> None:
-            async with semaphore:
-                task_id = current_progress.add_task(title)
-
-                try:
-                    detail = await module.fetch_manga_detail(manga_id, link)
-
-                    chapters: list[ModuleChapter] = []
-
-                    for chapter in detail.chapters:
-                        chapters.append(
-                            ModuleChapter(
-                                chapter.language,
-                                chapter.group,
-                                chapter.type,
-                                chapter.chapter_number,
-                                chapter.volume_number,
-                                chapter.title,
-                                chapter.link,
-                                chapter.chapter_id,
-                                False,
-                            )
-                        )
-
-                    if not manual_override and not skip_mapping:
-                        if map_only_null:
-                            if mangabaka_id is None:
-                                mangabaka_entry = (
-                                    await mangabaka_api.get_entry_by_title(
-                                        [detail.title, *detail.alt_titles]
-                                    )
-                                )
-
-                                if mangabaka_entry is not None:
-                                    mangabaka_id = dict_get_recursive(
-                                        mangabaka_entry, "id"
-                                    )
-                        else:
-                            mangabaka_entry = (
-                                await mangabaka_api.get_entry_by_title(
-                                    [detail.title, *detail.alt_titles]
-                                )
-                            )
-
-                            if mangabaka_entry is not None:
-                                mangabaka_id = dict_get_recursive(
-                                    mangabaka_entry, "id"
-                                )
-
-                        if map_only_null:
-                            if mangadotnet_id is None:
-                                if mangabaka_id is not None:
-                                    mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(
-                                        mangabaka_id
-                                    )
-
-                                    if mangadotnet_id is None:
-                                        response = await mangadotnet_api.create_from_mangabaka(
-                                            mangabaka_id
-                                        )
-                                        mangadotnet_id = dict_get_recursive(
-                                            response, "manga", "id"
-                                        )
-                                else:
-                                    mangadotnet_entry = await mangadotnet_api.get_entry_by_title(
-                                        [detail.title, *detail.alt_titles]
-                                    )
-
-                                    if mangadotnet_entry is not None:
-                                        mangadotnet_id = dict_get_recursive(
-                                            mangadotnet_entry, "manga", "id"
-                                        )
-                        else:
-                            if mangabaka_id is not None:
-                                mangadotnet_id = await mangadotnet_api.get_id_from_mangabaka_id(
-                                    mangabaka_id
-                                )
-
-                                if mangadotnet_id is None:
-                                    response = await mangadotnet_api.create_from_mangabaka(
-                                        mangabaka_id
-                                    )
-                                    mangadotnet_id = dict_get_recursive(
-                                        response, "manga", "id"
-                                    )
-                            else:
-                                mangadotnet_entry = (
-                                    await mangadotnet_api.get_entry_by_title(
-                                        [detail.title, *detail.alt_titles]
-                                    )
-                                )
-
-                                if mangadotnet_entry is not None:
-                                    mangadotnet_id = dict_get_recursive(
-                                        mangadotnet_entry, "manga", "id"
-                                    )
-
-                    async def is_chapter_uploaded(
-                        chapter: ModuleChapter,
-                    ) -> bool:
-                        if mangadotnet_id is None:
-                            return False
-
-                        if chapter.type == "chapter":
-                            mangadotnet_chapters = (
-                                await mangadotnet_api.get_chapters_by_id(
-                                    mangadotnet_id
-                                )
-                            )
-
-                            for mangadotnet_chapter in mangadotnet_chapters:
-                                mangadotnet_language = dict_get_recursive(
-                                    mangadotnet_chapter, "language"
-                                )
-                                mangadotnet_chapter_number = (
-                                    dict_get_recursive(
-                                        mangadotnet_chapter, "chapter_number"
-                                    )
-                                )
-
-                                if (
-                                    chapter.language == mangadotnet_language
-                                    and chapter.chapter_number
-                                    == mangadotnet_chapter_number
-                                ):
-                                    for (
-                                        mangadotnet_group
-                                    ) in dict_get_recursive(
-                                        mangadotnet_chapter,
-                                        "groups",
-                                        default=[],
-                                    ):
-                                        if (
-                                            chapter.scanlator_group
-                                            == dict_get_recursive(
-                                                mangadotnet_group, "name"
-                                            )
-                                        ):
-                                            return True
-                        else:
-                            mangadotnet_volumes = (
-                                await mangadotnet_api.get_volumes_by_id(
-                                    mangadotnet_id
-                                )
-                            )
-
-                            for mangadotnet_volume in mangadotnet_volumes:
-                                mangadotnet_language = dict_get_recursive(
-                                    mangadotnet_volume, "language"
-                                )
-                                mangadotnet_volume_number = dict_get_recursive(
-                                    mangadotnet_volume, "volume_number"
-                                )
-
-                                if (
-                                    chapter.language == mangadotnet_language
-                                    and chapter.volume_number
-                                    == mangadotnet_volume_number
-                                ):
-                                    for (
-                                        mangadotnet_group
-                                    ) in dict_get_recursive(
-                                        mangadotnet_volume,
-                                        "groups",
-                                        default=[],
-                                    ):
-                                        if (
-                                            chapter.scanlator_group
-                                            == dict_get_recursive(
-                                                mangadotnet_group, "name"
-                                            )
-                                        ):
-                                            return True
-
-                        return False
-
-                    if mangadotnet_id is not None:
-                        for chapter in chapters:
-                            chapter.uploaded = await is_chapter_uploaded(
-                                chapter
-                            )
-
-                    module_manga = ModuleManga(
-                        detail.title,
-                        detail.alt_titles,
-                        mangabaka_id,
-                        mangadotnet_id,
-                        chapters,
-                    )
-
-                    data.add_module_manga(rowid, module_manga)
-                except Exception:
-                    total_progress.print(f"Error fetching {title}")
-                    logging.getLogger().exception(f"Error fetching {title}")
-                finally:
-                    current_progress.remove_task(task_id)
-                    total_progress.advance(total_progress_task_id)
-
-        try:
-            async with asyncio.TaskGroup() as group:
-                for (
-                    rowid,
-                    manga_id,
-                    link,
-                    title,
-                    mangabaka_id,
-                    mangadotnet_id,
-                    manual_override,
-                ) in listing:
-                    group.create_task(
-                        fetch_manga_detail_task(
-                            rowid,
-                            manga_id,
-                            link,
-                            title,
-                            mangabaka_id,
-                            mangadotnet_id,
-                            manual_override,
-                        )
-                    )
-
-            total_progress.print(
-                f"Done fetching {module.display_name} Listing Details"
-            )
-        except* Exception:
-            total_progress.print(
-                f"Error fetching {module.display_name} Listing Details"
-            )
-            logging.getLogger().exception(
-                f"Error fetching {module.display_name} Listing Details"
-            )
-
-
-async def upload_chapters(
-    module: BaseModule,
-    config: MangaDotNetScraperConfig,
-    data: MangaDotNetScraperData,
-    mangadotnet_api: MangaDotNetApi,
-):
-    total_progress = Progress(
-        TextColumn("Upload {task.description} Overall"),
-        BarColumn(bar_width=None),
-        MofNCompleteColumn(),
-    )
-    current_progress_title = Progress(
-        TextColumn("{task.fields[status]} ({task.fields[count]})")
-    )
-
-    current_progress = Progress(
-        SpinnerColumn(),
-        TextColumn(
-            "[{task.fields[chapter]}] {task.fields[status]}", markup=False
-        ),
-        BarColumn(),
-        TaskProgressColumn(),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        TimeRemainingColumn(),
-    )
-
-    group_id_cache: dict[str, int] = {}
-
-    with Live(
-        Group(
-            Rule(),
-            total_progress,
-            Rule(),
-            current_progress_title,
-            current_progress,
-        ),
-        transient=True,
-    ):
-        manga_count, manga = data.get_non_uploaded_manga(module.module_id)
-        total_progress_task = total_progress.add_task(
-            module.display_name, total=manga_count
-        )
-        current_progress_title_task = current_progress_title.add_task(
-            "", status="", count=0
-        )
-
-        for rowid, manga_id, link, title, mangadotnet_id in manga:
-            current_progress_title.update(
-                current_progress_title_task,
-                status=f"Uploading: {title}",
-                count=0,
-            )
-
-            chapters_count, chapters = data.get_non_uploaded_chapters(rowid)
-
-            current_progress_title.update(
-                current_progress_title_task, count=chapters_count
-            )
-
-            chapters = [
-                (
-                    manga_rowid,
-                    language,
-                    scanlator_group,
-                    type,
-                    chapter_number,
-                    volume_number,
-                    chapter_title,
-                    link,
-                    chapter_id,
-                )
-                for manga_rowid, language, scanlator_group, type, chapter_number, volume_number, chapter_title, link, chapter_id in chapters
-            ]
-
-            upload_semaphore = Semaphore(module.upload_concurrency)
-
-            async def upload_chapter_task(
-                upload_semaphore: Semaphore,
-                mangadotnet_id: int,
-                manga_rowid: int,
-                language: str,
-                scanlator_group: str,
-                type: str,
-                chapter_number: float | None,
-                volume_number: float | None,
-                chapter_title: str,
-                chapter_link: str,
-                manga_link: str,
-                manga_id: str,
-                chapter_id: str,
-            ) -> None:
-                async with upload_semaphore:
-                    task_id = current_progress.add_task(
-                        "",
-                        start=False,
-                        total=None,
-                        chapter=f"{mangadotnet_id}:{language}:{chapter_number} [{scanlator_group}]",
-                        status="Fetching Manga Pages...",
-                    )
-
-                    try:
-                        pages = await module.fetch_manga_pages(
-                            manga_id, manga_link, chapter_id, chapter_link
-                        )
-                        pages_count = len(pages)
-
-                        if len(pages) == 0:
-                            logging.getLogger().info(
-                                f"Fetch Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                            )
-                            return
-
-                        current_progress.update(
-                            task_id,
-                            total=pages_count,
-                            status="Downloading Image",
-                        )
-
-                        zip_buffer = BytesIO()
-                        has_error = False
-
-                        with ZipFile(
-                            zip_buffer, "a", ZIP_DEFLATED, compresslevel=9
-                        ) as zip_file:
-                            download_semaphore = Semaphore(
-                                module.download_concurrency
-                            )
-
-                            async def download_image_task(page) -> None:
-                                async with download_semaphore:
-                                    image = await module.fetch_manga_image(
-                                        page
-                                    )
-                                    zip_file.writestr(
-                                        image.filename, image.data
-                                    )
-                                    current_progress.advance(task_id)
-
-                            try:
-                                async with TaskGroup() as group:
-                                    for page in pages:
-                                        group.create_task(
-                                            download_image_task(page)
-                                        )
-                            except* FetchError:
-                                has_error = True
-
-                        if has_error:
-                            logging.getLogger().info(
-                                f"Download Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                            )
-                            return
-
-                        zip_file_size = zip_buffer.tell()
-
-                        current_progress.update(
-                            task_id,
-                            completed=0,
-                            total=zip_file_size,
-                            status="Preparing Upload (1)",
-                        )
-
-                        group_id = group_id_cache.get(scanlator_group)
-
-                        if group_id is None:
-                            groups = await mangadotnet_api.get_group_ids(
-                                scanlator_group
-                            )
-                            for group in groups["groups"]:
-                                if group["name"] == scanlator_group:
-                                    group_id = group["id"]
-                                    group_id_cache[scanlator_group] = group[
-                                        "id"
-                                    ]
-                                    break
-
-                        if group_id is None:
-                            return
-
-                        if type != "chapter" and type != "volume":
-                            return
-
-                        current_progress.update(
-                            task_id,
-                            completed=0,
-                            total=zip_file_size,
-                            status="Preparing Upload (2)",
-                        )
-
-                        try:
-                            location = await mangadotnet_api.prepare_upload(
-                                zip_file_size,
-                                MangaDotNetApi.MangaDotNetTusUploadMetadata(
-                                    mangadotnet_id,
-                                    chapter_number,
-                                    volume_number,
-                                    language,
-                                    chapter_title,
-                                    [group_id],
-                                    None,
-                                    None,
-                                    type,
-                                    None,
-                                    None,
-                                ),
-                            )
-                        except ClientResponseError as error:
-                            if error.code == 409:
-                                logging.getLogger().info(
-                                    f"Upload Skipped (Already Uploaded): [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                                )
-                                data.mark_chapter_uploaded(
-                                    manga_rowid,
-                                    language,
-                                    scanlator_group,
-                                    type,
-                                    chapter_number,
-                                    volume_number,
-                                )
-                            return
-
-                        def callable_progress(current):
-                            current_progress.update(
-                                task_id, completed=current, status="Uploading"
-                            )
-
-                        current_progress.start_task(task_id)
-                        current_progress.update(task_id, status="Uploading")
-
-                        success = await mangadotnet_api.upload_file(
-                            location, zip_buffer, callable_progress
-                        )
-
-                        current_progress.stop_task(task_id)
-                        current_progress.update(
-                            task_id, total=None, status="Verify Upload (0s)"
-                        )
-
-                        if not success:
-                            return
-
-                        found = False
-                        start_check = monotonic()
-
-                        while True:
-                            uploaded_mangas = (
-                                await mangadotnet_api.get_uploaded_manga(
-                                    mangadotnet_id
-                                )
-                            )
-
-                            for uploaded_manga in uploaded_mangas["uploads"]:
-                                if (
-                                    type == "chapter"
-                                    and chapter_number is not None
-                                    and uploaded_manga["manga_id"]
-                                    == mangadotnet_id
-                                    and uploaded_manga["language"] == language
-                                    and uploaded_manga["chapter_number"]
-                                    is not None
-                                    and abs(
-                                        uploaded_manga["chapter_number"]
-                                        - chapter_number
-                                    )
-                                    < 0.1
-                                    and any(
-                                        uploaded_group["id"] == group_id
-                                        for uploaded_group in uploaded_manga[
-                                            "groups"
-                                        ]
-                                    )
-                                    and uploaded_manga["type"] == "chapter"
-                                    and (
-                                        uploaded_manga["status"] == "pending"
-                                        or uploaded_manga["status"]
-                                        == "approved"
-                                    )
-                                ):
-                                    # Upload Success
-                                    found = True
-                                    break
-
-                            if found:
-                                break
-
-                            await sleep(1)
-
-                            duration = monotonic() - start_check
-                            current_progress.update(
-                                task_id,
-                                status=f"Verify Upload ({duration:.0f}s)",
-                            )
-
-                            if duration > config.upload_verify_duration:
-                                break
-
-                        if found:
-                            data.mark_chapter_uploaded(
-                                manga_rowid,
-                                language,
-                                scanlator_group,
-                                type,
-                                chapter_number,
-                                volume_number,
-                            )
-                            logging.getLogger().info(
-                                f"Upload Success: [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                            )
-                        else:
-                            logging.getLogger().info(
-                                f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                            )
-                    except Exception:
-                        logging.getLogger().exception(
-                            f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
-                        )
-                    finally:
-                        current_progress.remove_task(task_id)
-
-            try:
-                async with TaskGroup() as group:
-                    for (
-                        manga_rowid,
-                        language,
-                        scanlator_group,
-                        type,
-                        chapter_number,
-                        volume_number,
-                        chapter_title,
-                        chapter_link,
-                        chapter_id,
-                    ) in chapters:
-                        group.create_task(
-                            upload_chapter_task(
-                                upload_semaphore,
-                                mangadotnet_id,
-                                manga_rowid,
-                                language,
-                                scanlator_group,
-                                type,
-                                chapter_number,
-                                volume_number,
-                                chapter_title,
-                                chapter_link,
-                                link,
-                                manga_id,
-                                chapter_id,
-                            )
-                        )
-            except* Exception as error:
-                logging.getLogger().exception(error.message)
-
-            total_progress.advance(total_progress_task)
-
-        total_progress.print(f"Done upload {module.display_name}")
-
-
-async def manual_entry_matching(
-    module: BaseModule,
-    data: MangaDotNetScraperData,
-    mangabaka_api: MangaBakaApi,
-    mangadotnet_api: MangaDotNetApi,
-) -> None:
-    async def show_initial_menu() -> None:
-        while True:
-            count, module_listing = data.get_module_listing_non_mapped(
-                module.module_id
-            )
-
-            choices = [
-                Choice(
-                    f"[{rowid}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
-                    rowid,
-                )
-                for rowid, manga_id, link, title, alt_titles, mangabaka_id, mangadotnet_id in module_listing
-            ]
-
-            selection = await questionary.select(
-                f"{module.display_name} - {count} Titles | Select title to map:",
-                choices=[
-                    *choices,
-                    Choice("Back", -1),
-                ],
-                use_jk_keys=False,
-                use_search_filter=True,
-            ).ask_async()
-
-            if selection is None or selection == -1:
-                break
-            else:
-                await show_update_mapping(selection)
-
-    async def show_update_mapping(rowid: int) -> None:
-        def check_for_int_or_skip(input: str) -> bool:
-            return (
-                input.lower().strip() == "skip"
-                or input.lower().strip() == "s"
-                or input.isdigit()
-            )
-
-        (
-            _rowid,
-            _module_id,
-            manga_id,
-            link,
-            title,
-            alt_titles,
-            mangabaka_id,
-            mangadotnet_id,
-            _last_checked,
-            _manual_override,
-            _skip_upload,
-        ) = cast(Any, data.get_module_manga(rowid).fetchone())
-
-        print(f"[{rowid}] {title}")
-        print("Manga Id:", manga_id)
-        print("Link:", link)
-        print("Alt Titles:")
-
-        if alt_titles is None:
-            print("== No alt titles available ==")
-        else:
-            for item in cast(str, alt_titles).splitlines():
-                print(item)
-
-        print(
-            "MangaBaka Id:",
-            mangabaka_id if mangabaka_id is not None else "NULL",
-        )
-        print(
-            "MangaDotNet Id:",
-            mangadotnet_id if mangadotnet_id is not None else "NULL",
-        )
-
-        selection = await questionary.select(
-            "What would you like to do?",
-            choices=[
-                Choice("Try auto mapping", 1),
-                Choice("Manual mapping (via MangaBaka)", 2),
-                Choice("Manual mapping (via MangaDotNet)", 3),
-                Choice("Back", -1),
-            ],
-            use_shortcuts=True,
-        ).ask_async()
-
-        if selection is None or selection == -1:
-            return
-        elif selection == 1:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("Fetching {task.fields[task]}", markup=False),
-                transient=True,
-            ) as progress:
-                task = progress.add_task(
-                    "", total=None, task="MangaBaka Entry"
-                )
-
-                titles = [title]
-
-                if alt_titles is not None:
-                    titles.extend(cast(str, alt_titles).splitlines())
-
-                mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                    titles
-                )
-
-                if mangabaka_entry is not None:
-                    mangabaka_id = dict_get_recursive(mangabaka_entry, "id")
-
-                progress.update(task, task="MangaDotNet Entry")
-
-                if mangabaka_id is not None:
-                    mangadotnet_id = (
-                        await mangadotnet_api.get_id_from_mangabaka_id(
-                            mangabaka_id
-                        )
-                    )
-
-                    if mangadotnet_id is None:
-                        response = await mangadotnet_api.create_from_mangabaka(
-                            mangabaka_id
-                        )
-                        mangadotnet_id = dict_get_recursive(
-                            response, "manga", "id"
-                        )
-                else:
-                    mangadotnet_entry = (
-                        await mangadotnet_api.get_entry_by_title(titles)
-                    )
-
-                    if mangadotnet_entry is not None:
-                        mangadotnet_id = dict_get_recursive(
-                            mangadotnet_entry, "manga", "id"
-                        )
-
-                if mangabaka_id is None and mangadotnet_id is None:
-                    progress.print(
-                        "Unable to find manga... Please use manual mapping."
-                    )
-                    return
-
-                data.update_manual_mapping(rowid, mangabaka_id, mangadotnet_id)
-                progress.print("Success")
-        elif selection == 2:
-            while True:
-                selection: str = await questionary.text(
-                    "Enter MangaBaka Id (s to cancel):",
-                    validate=check_for_int_or_skip,
-                ).ask_async()
-
-                if selection == "s" or selection == "skip":
-                    break
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("Fetching {task.fields[task]}", markup=False),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(
-                        "", total=None, task="MangaBaka Entry"
-                    )
-
-                    mangabaka_id = int(selection)
-
-                    try:
-                        await mangabaka_api.get_entry_by_id(mangabaka_id)
-                    except ClientResponseError as error:
-                        progress.print(error.message, markup=False)
-                        continue
-
-                    progress.update(task, task="MangaDotNet Entry")
-
-                    mangadotnet_id = (
-                        await mangadotnet_api.get_id_from_mangabaka_id(
-                            mangabaka_id
-                        )
-                    )
-
-                    if mangadotnet_id is None:
-                        response = await mangadotnet_api.create_from_mangabaka(
-                            mangabaka_id
-                        )
-                        mangadotnet_id = response["manga"]["id"]
-
-                    if mangadotnet_id is None:
-                        progress.print(
-                            "Unable to create mangadot id. Please try again later"
-                        )
-                        break
-
-                    data.update_manual_mapping(
-                        rowid, mangabaka_id, mangadotnet_id
-                    )
-                    progress.print("Success")
-                    return
-        elif selection == 3:
-            while True:
-                selection: str = await questionary.text(
-                    "Enter MangaDotNet Id (s to cancel):",
-                    validate=check_for_int_or_skip,
-                ).ask_async()
-
-                if selection == "s" or selection == "skip":
-                    break
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("Fetching {task.fields[task]}", markup=False),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(
-                        "", total=None, task="MangaDotNet Entry"
-                    )
-
-                    progress.update(task, task="MangaDotNet Entry")
-
-                    mangadotnet_id = int(selection)
-
-                    try:
-                        await mangadotnet_api.get_entry_by_id(mangadotnet_id)
-                    except ClientResponseError:
-                        mangadotnet_id = None
-
-                    if mangadotnet_id is None:
-                        progress.print("Unable to find mangadotnet entry.")
-                        break
-
-                    data.update_manual_mapping(
-                        rowid, mangabaka_id, mangadotnet_id
-                    )
-                    progress.print("Success")
-                    return
-
-    await show_initial_menu()
-
-
-async def manual_source_editing(
-    module: BaseModule,
-    data: MangaDotNetScraperData,
-    mangabaka_api: MangaBakaApi,
-    mangadotnet_api: MangaDotNetApi,
-) -> None:
-    async def show_initial_menu() -> None:
-        while True:
-            count, module_listing = data.get_module_listing(
-                module.module_id,
-                columns=["rowid", "title", "alt_titles", "mangadotnet_id"],
-            )
-
-            choices = [
-                Choice(
-                    f"[{rowid}] [{mangadotnet_id if mangadotnet_id is not None else 'NULL'}] {title} [+{len(cast(str, alt_titles).splitlines()) if alt_titles is not None else 0} Alt Titles]",
-                    rowid,
-                )
-                for rowid, title, alt_titles, mangadotnet_id in module_listing
-            ]
-
-            selection = await questionary.select(
-                f"{module.display_name} - {count} Titles | Select title to edit:",
-                choices=[
-                    *choices,
-                    Choice("Back", -1),
-                ],
-                use_jk_keys=False,
-                use_search_filter=True,
-            ).ask_async()
-
-            if selection is None or selection == -1:
-                break
-            else:
-                await show_manga_info_menu(selection)
-
-    async def show_manga_info_menu(rowid: int) -> None:
-        while True:
-            (
-                rowid,
-                _module_id,
-                manga_id,
-                link,
-                title,
-                alt_titles,
-                mangabaka_id,
-                mangadotnet_id,
-                last_checked,
-                _manual_override,
-                skip_upload,
-            ) = cast(Any, data.get_module_manga(rowid).fetchone())
-
-            print(f"[{rowid}] {title}")
-            print("Manga Id:", manga_id)
-            print("Link:", link)
-            print("Alt Titles:")
-
-            if alt_titles is None:
-                print("== No alt titles available ==")
-            else:
-                for item in cast(str, alt_titles).splitlines():
-                    print(item)
-
-            print(
-                "MangaBaka Id:",
-                mangabaka_id if mangabaka_id is not None else "NULL",
-            )
-            print(
-                "MangaDotNet Id:",
-                mangadotnet_id if mangadotnet_id is not None else "NULL",
-            )
-
-            print(
-                "Last Checked:",
-                asctime(gmtime(last_checked))
-                if last_checked is not None
-                else "Never",
-            )
-
-            print("Skip Upload:", bool(skip_upload))
-
-            selection = await questionary.select(
-                "What would you like to do?",
-                choices=[
-                    Choice("Update Mapping", 1),
-                    Choice("Enable/Disable Upload", 2),
-                    Choice("Fetch Chapters", 3),
-                    # Choice("Modify Chapter", 4),
-                    # Choice("Upload", 5),
-                    Choice("Delete Entry", 6),
-                    Choice("Back", -1),
-                ],
-                use_shortcuts=True,
-            ).ask_async()
-
-            if selection is None or selection == -1:
-                break
-            elif selection == 1:
-                await show_update_mapping(rowid)
-            elif selection == 2:
-                data.update_module_manga_upload_status(rowid, not skip_upload)
-            elif selection == 3:
-                await fetch_chapters(rowid)
-            elif selection == 6:
-                data.remove_module_manga(rowid)
-                break
-
-    async def show_update_mapping(rowid: int) -> None:
-        def check_for_int_or_skip(input: str) -> bool:
-            return (
-                input.lower().strip() == "skip"
-                or input.lower().strip() == "s"
-                or input.isdigit()
-            )
-
-        (
-            _rowid,
-            _module_id,
-            _manga_id,
-            _link,
-            title,
-            alt_titles,
-            mangabaka_id,
-            mangadotnet_id,
-            _last_checked,
-            _manual_override,
-            _skip_upload,
-        ) = cast(Any, data.get_module_manga(rowid).fetchone())
-
-        selection = await questionary.select(
-            "What would you like to do?",
-            choices=[
-                Choice("Try auto mapping", 1),
-                Choice("Manual mapping (via MangaBaka)", 2),
-                Choice("Manual mapping (via MangaDotNet)", 3),
-                Choice("Back", -1),
-            ],
-            use_shortcuts=True,
-        ).ask_async()
-
-        if selection is None or selection == -1:
-            return
-        elif selection == 1:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("Fetching {task.fields[task]}", markup=False),
-                transient=True,
-            ) as progress:
-                task = progress.add_task(
-                    "", total=None, task="MangaBaka Entry"
-                )
-
-                titles = [title]
-
-                if alt_titles is not None:
-                    titles.extend(cast(str, alt_titles).splitlines())
-
-                mangabaka_entry = await mangabaka_api.get_entry_by_title(
-                    titles
-                )
-
-                if mangabaka_entry is not None:
-                    mangabaka_id = dict_get_recursive(mangabaka_entry, "id")
-
-                progress.update(task, task="MangaDotNet Entry")
-
-                if mangabaka_id is not None:
-                    mangadotnet_id = (
-                        await mangadotnet_api.get_id_from_mangabaka_id(
-                            mangabaka_id
-                        )
-                    )
-
-                    if mangadotnet_id is None:
-                        response = await mangadotnet_api.create_from_mangabaka(
-                            mangabaka_id
-                        )
-                        mangadotnet_id = dict_get_recursive(
-                            response, "manga", "id"
-                        )
-                else:
-                    mangadotnet_entry = (
-                        await mangadotnet_api.get_entry_by_title(titles)
-                    )
-
-                    if mangadotnet_entry is not None:
-                        mangadotnet_id = dict_get_recursive(
-                            mangadotnet_entry, "manga", "id"
-                        )
-
-                if mangabaka_id is None and mangadotnet_id is None:
-                    progress.print(
-                        "Unable to find manga... Please use manual mapping."
-                    )
-                    return
-
-                data.update_manual_mapping(rowid, mangabaka_id, mangadotnet_id)
-                progress.print("Success")
-        elif selection == 2:
-            while True:
-                selection: str = await questionary.text(
-                    "Enter MangaBaka Id (s to cancel):",
-                    validate=check_for_int_or_skip,
-                ).ask_async()
-
-                if selection == "skip" or selection == "s":
-                    break
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("Fetching {task.fields[task]}", markup=False),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(
-                        "", total=None, task="MangaBaka Entry"
-                    )
-
-                    mangabaka_id = int(selection)
-
-                    try:
-                        await mangabaka_api.get_entry_by_id(mangabaka_id)
-                    except ClientResponseError as error:
-                        progress.print(error.message, markup=False)
-                        continue
-
-                    progress.update(task, task="MangaDotNet Entry")
-
-                    mangadotnet_id = (
-                        await mangadotnet_api.get_id_from_mangabaka_id(
-                            mangabaka_id
-                        )
-                    )
-
-                    if mangadotnet_id is None:
-                        response = await mangadotnet_api.create_from_mangabaka(
-                            mangabaka_id
-                        )
-                        mangadotnet_id = response["manga"]["id"]
-
-                    if mangadotnet_id is None:
-                        progress.print(
-                            "Unable to create mangadot id. Please try again later"
-                        )
-                        break
-
-                    data.update_manual_mapping(
-                        rowid, mangabaka_id, mangadotnet_id
-                    )
-                    progress.print("Success")
-                    return
-        elif selection == 3:
-            while True:
-                selection: str = await questionary.text(
-                    "Enter MangaDotNet Id (s to cancel):",
-                    validate=check_for_int_or_skip,
-                ).ask_async()
-
-                if selection == "skip" or selection == "s":
-                    break
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("Fetching {task.fields[task]}", markup=False),
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task(
-                        "", total=None, task="MangaDotNet Entry"
-                    )
-
-                    progress.update(task, task="MangaDotNet Entry")
-
-                    mangadotnet_id = int(selection)
-
-                    try:
-                        await mangadotnet_api.get_entry_by_id(mangadotnet_id)
-                    except ClientResponseError:
-                        mangadotnet_id = None
-
-                    if mangadotnet_id is None:
-                        progress.print("Unable to find mangadotnet entry.")
-                        break
-
-                    data.update_manual_mapping(
-                        rowid, mangabaka_id, mangadotnet_id
-                    )
-                    progress.print("Success")
-                    return
-
-    async def fetch_chapters(rowid: int) -> None:
-        (
-            _rowid,
-            _module_id,
-            manga_id,
-            link,
-            title,
-            _alt_titles,
-            mangabaka_id,
-            mangadotnet_id,
-            _last_checked,
-            _manual_override,
-            _skip_upload,
-        ) = cast(Any, data.get_module_manga(rowid).fetchone())
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("Fetching {task.description}", markup=False),
-            transient=True,
-        ) as progress:
-            progress.add_task(title, total=None)
-
-            try:
-                detail = await module.fetch_manga_detail(manga_id, link)
-
-                chapters: list[ModuleChapter] = []
-
-                for chapter in detail.chapters:
-                    chapters.append(
-                        ModuleChapter(
-                            chapter.language,
-                            chapter.group,
-                            chapter.type,
-                            chapter.chapter_number,
-                            chapter.volume_number,
-                            chapter.title,
-                            chapter.link,
-                            chapter.chapter_id,
-                            False,
-                        )
-                    )
-
-                async def is_chapter_uploaded(
-                    chapter: ModuleChapter,
-                ) -> bool:
-                    if chapter.type == "chapter":
-                        mangadotnet_chapters = (
-                            await mangadotnet_api.get_chapters_by_id(
-                                mangadotnet_id
-                            )
-                        )
-
-                        for mangadotnet_chapter in mangadotnet_chapters:
-                            mangadotnet_language = dict_get_recursive(
-                                mangadotnet_chapter, "language"
-                            )
-                            mangadotnet_chapter_number = dict_get_recursive(
-                                mangadotnet_chapter, "chapter_number"
-                            )
-
-                            if (
-                                chapter.language == mangadotnet_language
-                                and chapter.chapter_number
-                                == mangadotnet_chapter_number
-                            ):
-                                for mangadotnet_group in dict_get_recursive(
-                                    mangadotnet_chapter,
-                                    "groups",
-                                    default=[],
-                                ):
-                                    if (
-                                        chapter.scanlator_group
-                                        == dict_get_recursive(
-                                            mangadotnet_group, "name"
-                                        )
-                                    ):
-                                        return True
-                    else:
-                        mangadotnet_volumes = (
-                            await mangadotnet_api.get_volumes_by_id(
-                                mangadotnet_id
-                            )
-                        )
-
-                        for mangadotnet_volume in mangadotnet_volumes:
-                            mangadotnet_language = dict_get_recursive(
-                                mangadotnet_volume, "language"
-                            )
-                            mangadotnet_volume_number = dict_get_recursive(
-                                mangadotnet_volume, "volume_number"
-                            )
-
-                            if (
-                                chapter.language == mangadotnet_language
-                                and chapter.volume_number
-                                == mangadotnet_volume_number
-                            ):
-                                for mangadotnet_group in dict_get_recursive(
-                                    mangadotnet_volume,
-                                    "groups",
-                                    default=[],
-                                ):
-                                    if (
-                                        chapter.scanlator_group
-                                        == dict_get_recursive(
-                                            mangadotnet_group, "name"
-                                        )
-                                    ):
-                                        return True
-
-                    return False
-
-                if mangadotnet_id is not None:
-                    for chapter in chapters:
-                        chapter.uploaded = await is_chapter_uploaded(chapter)
-
-                module_manga = ModuleManga(
-                    detail.title,
-                    detail.alt_titles,
-                    mangabaka_id,
-                    mangadotnet_id,
-                    chapters,
-                )
-
-                data.add_module_manga(rowid, module_manga)
-                progress.print(
-                    f"Success fetching {title}", markup=False, highlight=False
-                )
-            except Exception:
-                progress.print(
-                    f"Error fetching {title}", markup=False, highlight=False
-                )
-                logging.getLogger().exception(f"Error fetching {title}")
-
-    await show_initial_menu()
+# async def upload_chapters(
+#     module: BaseModule,
+#     config: MangaDotNetScraperConfig,
+#     data: MangaDotNetScraperData,
+#     mangadotnet_api: MangaDotNetApi,
+# ):
+#     total_progress = Progress(
+#         TextColumn("Upload {task.description} Overall"),
+#         BarColumn(bar_width=None),
+#         MofNCompleteColumn(),
+#     )
+#     current_progress_title = Progress(
+#         TextColumn("{task.fields[status]} ({task.fields[count]})")
+#     )
+
+#     current_progress = Progress(
+#         SpinnerColumn(),
+#         TextColumn(
+#             "[{task.fields[chapter]}] {task.fields[status]}", markup=False
+#         ),
+#         BarColumn(),
+#         TaskProgressColumn(),
+#         DownloadColumn(),
+#         TransferSpeedColumn(),
+#         TimeRemainingColumn(),
+#     )
+
+#     group_id_cache: dict[str, int] = {}
+
+#     with Live(
+#         Group(
+#             Rule(),
+#             total_progress,
+#             Rule(),
+#             current_progress_title,
+#             current_progress,
+#         ),
+#         transient=True,
+#     ):
+#         manga_count, manga = data.get_non_uploaded_manga(module.module_id)
+#         total_progress_task = total_progress.add_task(
+#             module.display_name, total=manga_count
+#         )
+#         current_progress_title_task = current_progress_title.add_task(
+#             "", status="", count=0
+#         )
+
+#         for rowid, manga_id, link, title, mangadotnet_id in manga:
+#             current_progress_title.update(
+#                 current_progress_title_task,
+#                 status=f"Uploading: {title}",
+#                 count=0,
+#             )
+
+#             chapters_count, chapters = data.get_non_uploaded_chapters(rowid)
+
+#             current_progress_title.update(
+#                 current_progress_title_task, count=chapters_count
+#             )
+
+#             chapters = [
+#                 (
+#                     manga_rowid,
+#                     language,
+#                     scanlator_group,
+#                     type,
+#                     chapter_number,
+#                     volume_number,
+#                     chapter_title,
+#                     link,
+#                     chapter_id,
+#                 )
+#                 for manga_rowid, language, scanlator_group, type, chapter_number, volume_number, chapter_title, link, chapter_id in chapters
+#             ]
+
+#             upload_semaphore = Semaphore(module.upload_concurrency)
+
+#             async def upload_chapter_task(
+#                 upload_semaphore: Semaphore,
+#                 mangadotnet_id: int,
+#                 manga_rowid: int,
+#                 language: str,
+#                 scanlator_group: str,
+#                 type: str,
+#                 chapter_number: float | None,
+#                 volume_number: float | None,
+#                 chapter_title: str,
+#                 chapter_link: str,
+#                 manga_link: str,
+#                 manga_id: str,
+#                 chapter_id: str,
+#             ) -> None:
+#                 async with upload_semaphore:
+#                     task_id = current_progress.add_task(
+#                         "",
+#                         start=False,
+#                         total=None,
+#                         chapter=f"{mangadotnet_id}:{language}:{chapter_number} [{scanlator_group}]",
+#                         status="Fetching Manga Pages...",
+#                     )
+
+#                     try:
+#                         pages = await module.fetch_manga_pages(
+#                             manga_id, manga_link, chapter_id, chapter_link
+#                         )
+#                         pages_count = len(pages)
+
+#                         if len(pages) == 0:
+#                             logging.getLogger().info(
+#                                 f"Fetch Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                             )
+#                             return
+
+#                         current_progress.update(
+#                             task_id,
+#                             total=pages_count,
+#                             status="Downloading Image",
+#                         )
+
+#                         zip_buffer = BytesIO()
+#                         has_error = False
+
+#                         with ZipFile(
+#                             zip_buffer, "a", ZIP_DEFLATED, compresslevel=9
+#                         ) as zip_file:
+#                             download_semaphore = Semaphore(
+#                                 module.download_concurrency
+#                             )
+
+#                             async def download_image_task(page) -> None:
+#                                 async with download_semaphore:
+#                                     image = await module.fetch_manga_image(
+#                                         page
+#                                     )
+#                                     zip_file.writestr(
+#                                         image.filename, image.data
+#                                     )
+#                                     current_progress.advance(task_id)
+
+#                             try:
+#                                 async with TaskGroup() as group:
+#                                     for page in pages:
+#                                         group.create_task(
+#                                             download_image_task(page)
+#                                         )
+#                             except* FetchError:
+#                                 has_error = True
+
+#                         if has_error:
+#                             logging.getLogger().info(
+#                                 f"Download Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                             )
+#                             return
+
+#                         zip_file_size = zip_buffer.tell()
+
+#                         current_progress.update(
+#                             task_id,
+#                             completed=0,
+#                             total=zip_file_size,
+#                             status="Preparing Upload (1)",
+#                         )
+
+#                         group_id = group_id_cache.get(scanlator_group)
+
+#                         if group_id is None:
+#                             groups = await mangadotnet_api.get_group_ids(
+#                                 scanlator_group
+#                             )
+#                             for group in groups["groups"]:
+#                                 if group["name"] == scanlator_group:
+#                                     group_id = group["id"]
+#                                     group_id_cache[scanlator_group] = group[
+#                                         "id"
+#                                     ]
+#                                     break
+
+#                         if group_id is None:
+#                             return
+
+#                         if type != "chapter" and type != "volume":
+#                             return
+
+#                         current_progress.update(
+#                             task_id,
+#                             completed=0,
+#                             total=zip_file_size,
+#                             status="Preparing Upload (2)",
+#                         )
+
+#                         try:
+#                             location = await mangadotnet_api.prepare_upload(
+#                                 zip_file_size,
+#                                 MangaDotNetApi.MangaDotNetTusUploadMetadata(
+#                                     mangadotnet_id,
+#                                     chapter_number,
+#                                     volume_number,
+#                                     language,
+#                                     chapter_title,
+#                                     [group_id],
+#                                     None,
+#                                     None,
+#                                     type,
+#                                     None,
+#                                     None,
+#                                 ),
+#                             )
+#                         except ClientResponseError as error:
+#                             if error.code == 409:
+#                                 logging.getLogger().info(
+#                                     f"Upload Skipped (Already Uploaded): [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                                 )
+#                                 data.mark_chapter_uploaded(
+#                                     manga_rowid,
+#                                     language,
+#                                     scanlator_group,
+#                                     type,
+#                                     chapter_number,
+#                                     volume_number,
+#                                 )
+#                             return
+
+#                         def callable_progress(current):
+#                             current_progress.update(
+#                                 task_id, completed=current, status="Uploading"
+#                             )
+
+#                         current_progress.start_task(task_id)
+#                         current_progress.update(task_id, status="Uploading")
+
+#                         success = await mangadotnet_api.upload_file(
+#                             location, zip_buffer, callable_progress
+#                         )
+
+#                         current_progress.stop_task(task_id)
+#                         current_progress.update(
+#                             task_id, total=None, status="Verify Upload (0s)"
+#                         )
+
+#                         if not success:
+#                             return
+
+#                         found = False
+#                         start_check = monotonic()
+
+#                         while True:
+#                             uploaded_mangas = (
+#                                 await mangadotnet_api.get_uploaded_manga(
+#                                     mangadotnet_id
+#                                 )
+#                             )
+
+#                             for uploaded_manga in uploaded_mangas["uploads"]:
+#                                 if (
+#                                     type == "chapter"
+#                                     and chapter_number is not None
+#                                     and uploaded_manga["manga_id"]
+#                                     == mangadotnet_id
+#                                     and uploaded_manga["language"] == language
+#                                     and uploaded_manga["chapter_number"]
+#                                     is not None
+#                                     and abs(
+#                                         uploaded_manga["chapter_number"]
+#                                         - chapter_number
+#                                     )
+#                                     < 0.1
+#                                     and any(
+#                                         uploaded_group["id"] == group_id
+#                                         for uploaded_group in uploaded_manga[
+#                                             "groups"
+#                                         ]
+#                                     )
+#                                     and uploaded_manga["type"] == "chapter"
+#                                     and (
+#                                         uploaded_manga["status"] == "pending"
+#                                         or uploaded_manga["status"]
+#                                         == "approved"
+#                                     )
+#                                 ):
+#                                     # Upload Success
+#                                     found = True
+#                                     break
+
+#                             if found:
+#                                 break
+
+#                             await sleep(1)
+
+#                             duration = monotonic() - start_check
+#                             current_progress.update(
+#                                 task_id,
+#                                 status=f"Verify Upload ({duration:.0f}s)",
+#                             )
+
+#                             if duration > config.upload_verify_duration:
+#                                 break
+
+#                         if found:
+#                             data.mark_chapter_uploaded(
+#                                 manga_rowid,
+#                                 language,
+#                                 scanlator_group,
+#                                 type,
+#                                 chapter_number,
+#                                 volume_number,
+#                             )
+#                             logging.getLogger().info(
+#                                 f"Upload Success: [{manga_rowid}] {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                             )
+#                         else:
+#                             logging.getLogger().info(
+#                                 f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                             )
+#                     except Exception:
+#                         logging.getLogger().exception(
+#                             f"Upload Failure [{manga_rowid}]: {mangadotnet_id}:{language}:{chapter_number} {chapter_title} [{scanlator_group}]"
+#                         )
+#                     finally:
+#                         current_progress.remove_task(task_id)
+
+#             try:
+#                 async with TaskGroup() as group:
+#                     for (
+#                         manga_rowid,
+#                         language,
+#                         scanlator_group,
+#                         type,
+#                         chapter_number,
+#                         volume_number,
+#                         chapter_title,
+#                         chapter_link,
+#                         chapter_id,
+#                     ) in chapters:
+#                         group.create_task(
+#                             upload_chapter_task(
+#                                 upload_semaphore,
+#                                 mangadotnet_id,
+#                                 manga_rowid,
+#                                 language,
+#                                 scanlator_group,
+#                                 type,
+#                                 chapter_number,
+#                                 volume_number,
+#                                 chapter_title,
+#                                 chapter_link,
+#                                 link,
+#                                 manga_id,
+#                                 chapter_id,
+#                             )
+#                         )
+#             except* Exception as error:
+#                 logging.getLogger().exception(error.message)
+
+#             total_progress.advance(total_progress_task)
+
+#         total_progress.print(f"Done upload {module.display_name}")
