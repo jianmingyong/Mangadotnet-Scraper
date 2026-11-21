@@ -5,11 +5,19 @@ from functools import wraps
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
-from .base import HttpClientProvider, HttpResponseError, Response
-from .providers import AioHttpClientProvider
+from .base import HttpClient, HttpResponseError, Response
+from .providers import AioHttpClient
+
+__all__ = [
+    "HttpClient",
+    "HttpResponseError",
+    "Response",
+    "create_http_client",
+    "retryable_client_method",
+]
 
 
-def default_retryable_status(error: HttpResponseError) -> bool:
+def _default_retryable_status(error: HttpResponseError) -> bool:
     if (
         error.headers is not None
         and error.headers.get("cf-mitigated") == "challenge"
@@ -31,9 +39,8 @@ def retryable_client_method[**P, R](
     retry_wait_duration: int = 5,
     retryable_status: Callable[
         [HttpResponseError], bool
-    ] = default_retryable_status,
+    ] = _default_retryable_status,
 ) -> Callable[P, Coroutine[None, None, R]]:
-
     @wraps(async_func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         for retry in range(max_retry):
@@ -65,15 +72,7 @@ def create_http_client(
     cookies: Mapping[str, str] | None = None,
     limiter: LeakyBucketLimiter | Limiter | StrictLimiter | None = None,
     **kwargs,
-) -> HttpClientProvider:
-    return AioHttpClientProvider(
+) -> HttpClient:
+    return AioHttpClient(
         base_url, user_agent, headers, cookies, limiter, **kwargs
     )
-
-
-__all__ = [
-    "HttpResponseError",
-    "Response",
-    "create_http_client",
-    "retryable_client_method",
-]

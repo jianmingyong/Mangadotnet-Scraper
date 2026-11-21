@@ -4,7 +4,8 @@ from typing import override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -19,9 +20,10 @@ from mangadotnet_scraper.utilities import dict_get_recursive
 class SpringToonsSourceProvider(BaseSourceProvider):
     GROUP_ID = "Spring Toons"
 
-    def __init__(self, config: ConfigProvider) -> None:
+    def __init__(self, config: Config, browser: Browser) -> None:
         super().__init__(
             config,
+            browser,
             source_id="en.spring_toons",
             name="Spring Toons",
             version=1,
@@ -67,9 +69,9 @@ class SpringToonsSourceProvider(BaseSourceProvider):
             if series is None:
                 raise SourceError("Unable to find script data")
 
-            browser = await self.get_browser()
+            context = await self.browser.get_shared_context()
 
-            async with await browser.new_page() as browser_page:
+            async with await context.new_page() as browser_page:
                 series_json = await browser_page.evaluate(f"() => {series[1]}")
 
                 for series in series_json:
@@ -119,9 +121,9 @@ class SpringToonsSourceProvider(BaseSourceProvider):
             )
 
             if alt_titles_data is not None:
-                browser = await self.get_browser()
+                context = await self.browser.get_shared_context()
 
-                async with await browser.new_page() as browser_page:
+                async with await context.new_page() as browser_page:
                     alt_titles_json = await browser_page.evaluate(
                         f"() => {alt_titles_data[1]}"
                     )
@@ -137,9 +139,9 @@ class SpringToonsSourceProvider(BaseSourceProvider):
             chapter_data = re.search(r"chapters:(\[.*?\]),", script.text)
 
             if chapter_data is not None:
-                browser = await self.get_browser()
+                context = await self.browser.get_shared_context()
 
-                async with await browser.new_page() as browser_page:
+                async with await context.new_page() as browser_page:
                     chapter_json = await browser_page.evaluate(
                         f"() => {chapter_data[1]}"
                     )
@@ -198,9 +200,9 @@ class SpringToonsSourceProvider(BaseSourceProvider):
         page_data = re.search(r"pages:(\[.*?\]),", script.text)
 
         if page_data is not None:
-            browser = await self.get_browser()
+            context = await self.browser.get_shared_context()
 
-            async with await browser.new_page() as browser_page:
+            async with await context.new_page() as browser_page:
                 page_json = await browser_page.evaluate(
                     f"() => {page_data[1]}"
                 )

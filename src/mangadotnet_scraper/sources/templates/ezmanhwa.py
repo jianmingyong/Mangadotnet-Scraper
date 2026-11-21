@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Final, TypedDict, Unpack, override
 
-from mangadotnet_scraper.camoufox_utils import get_default_user_agent
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -70,11 +70,12 @@ class EzManhwaTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: ConfigProvider,
+        config: Config,
+        browser: Browser,
         group_name: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
-        super().__init__(config, **kwargs)
+        super().__init__(config, browser, **kwargs)
 
         self.group_name = group_name
 
@@ -85,10 +86,7 @@ class EzManhwaTemplate(BaseSourceProvider):
     @override
     async def _on_initialize(self) -> None:
         if self.user_agent is None:
-            self.user_agent = (
-                await get_default_user_agent()
-                or "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0"
-            )
+            self.user_agent = self.browser.user_agent
 
         if self.headers is None:
             self.headers = {

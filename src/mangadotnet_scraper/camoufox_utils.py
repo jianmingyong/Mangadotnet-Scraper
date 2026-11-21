@@ -2,14 +2,65 @@ import asyncio
 import logging
 import sys
 from asyncio import create_task, sleep, wait
-from typing import Literal, cast
+from contextlib import AbstractAsyncContextManager
+from typing import Literal, Self, cast, override
 
 from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, Error, Page, Response, TimeoutError
+from playwright.async_api import Browser as PlaywrightBrowser
+from playwright.async_api import (
+    BrowserContext,
+    Error,
+    Page,
+    Response,
+    TimeoutError,
+)
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from playwright_captcha.utils.camoufox_add_init_script.add_init_script import (
     get_addon_path,
 )
+
+
+class Browser(AbstractAsyncContextManager):
+    _browser: PlaywrightBrowser
+    _browser_context: BrowserContext
+
+    user_agent: str
+
+    @override
+    async def __aenter__(self) -> Self:
+        await self.initialize()
+        return self
+
+    @override
+    async def __aexit__(self, *args) -> None:
+        await self.close()
+
+    async def initialize(self) -> None:
+        self._browser = cast(PlaywrightBrowser, await create_browser().start())
+        self._browser_context = await self.new_context()
+
+        async with await self._browser_context.new_page() as page:
+            self.user_agent = await page.evaluate("navigator.userAgent")
+
+    async def close(self) -> None:
+        await self._browser_context.close()
+        await self._browser.close()
+
+    async def new_context(
+        self,
+        user_agent: str | None = None,
+        base_url: str | None = None,
+        **kwargs,
+    ) -> BrowserContext:
+        return await self._browser.new_context(
+            user_agent=user_agent, base_url=base_url, **kwargs
+        )
+
+    async def get_shared_context(self) -> BrowserContext:
+        if self._browser_context.is_closed():
+            self._browser_context = await self.new_context()
+
+        return self._browser_context
 
 
 def create_browser(
@@ -36,21 +87,6 @@ def create_browser(
         addons=[get_addon_path()],
         **launch_options,
     )
-
-
-async def get_default_user_agent() -> str | None:
-    try:
-        async with (
-            create_browser() as browser,
-            await cast(Browser, browser).new_context() as context,
-        ):
-            page = await context.new_page()
-            return await page.evaluate("navigator.userAgent")
-    except Error:
-        logging.getLogger(__name__).exception(
-            "[Camoufox] Failed to get user agent due to camoufox error"
-        )
-        return None
 
 
 async def solve_cloudflare_captcha_interstitial(
@@ -136,7 +172,7 @@ async def get_cloudflare_cookies(
     try:
         async with (
             create_browser() as browser,
-            await cast(Browser, browser).new_context(
+            await cast(PlaywrightBrowser, browser).new_context(
                 user_agent=user_agent
             ) as context,
             await context.new_page() as page,

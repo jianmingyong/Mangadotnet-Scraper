@@ -4,7 +4,8 @@ from typing import Any, Final, Unpack, cast, override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
     HttpResponseError,
     retryable_client_method,
@@ -27,12 +28,13 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: ConfigProvider,
+        config: Config,
+        browser: Browser,
         group_name: str,
         base_cdn_url: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
-        super().__init__(config, **kwargs)
+        super().__init__(config, browser, **kwargs)
 
         self.group_name = group_name
         self.base_cdn_url = base_cdn_url
@@ -47,7 +49,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
         )
 
     @retryable_client_method
-    async def test_page_response(self, link: str) -> bool:
+    async def is_link_exist(self, link: str) -> bool:
         try:
             async with await self.client.head(link) as response:
                 response.raise_for_status()
@@ -183,9 +185,9 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
 
         x_data = cast(str, x_data_element.get("x-data", default="{}"))
 
-        browser = await self.get_browser()
+        context = await self.browser.get_shared_context()
 
-        async with await browser.new_page() as page:
+        async with await context.new_page() as page:
             x_data_json: Mapping[str, Any] = await page.evaluate(
                 f"""
                 (() => {{
@@ -233,7 +235,7 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                     else:
                         image_link = f"{self.base_cdn_url}/series/webtoon/{manga.id}/chapters/{chapter.id}/revisions/{revision_id}/{page:03d}.jpg"
 
-                    if await self.test_page_response(image_link):
+                    if await self.is_link_exist(image_link):
                         pages.append(Page(page, image_link))
                         page += 1
                     else:

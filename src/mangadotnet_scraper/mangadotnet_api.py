@@ -44,9 +44,9 @@ from mangadotnet_scraper.camoufox_utils import (
     solve_cloudflare_captcha_interstitial,
     solve_cloudflare_captcha_turnstile,
 )
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
-    HttpClientProvider,
+    HttpClient,
     HttpResponseError,
     create_http_client,
     retryable_client_method,
@@ -198,11 +198,11 @@ class MangaDotNetLoginRequestHandler(ABC):
 class MangaDotNetLoginMiddleware(Middleware):
     _AUTHENTICATION_COOKIE = "ory_kratos_session"
 
-    _config: Final[ConfigProvider]
+    _config: Final[Config]
 
     def __init__(
         self,
-        config: ConfigProvider,
+        config: Config,
     ) -> None:
         self._config = config
 
@@ -243,8 +243,8 @@ class MangaDotNetApi(AbstractAsyncContextManager):
         422,
     ]
 
-    _config: Final[ConfigProvider]
-    _client: Final[HttpClientProvider]
+    _config: Final[Config]
+    _client: Final[HttpClient]
 
     @staticmethod
     def _resolve_ptr_table_json(
@@ -307,7 +307,7 @@ class MangaDotNetApi(AbstractAsyncContextManager):
 
     def __init__(
         self,
-        config: ConfigProvider,
+        config: Config,
     ) -> None:
         self._config = config
         self._client = create_http_client(

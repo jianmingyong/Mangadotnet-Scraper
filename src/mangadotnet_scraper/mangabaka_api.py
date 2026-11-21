@@ -5,7 +5,7 @@ from math import floor
 from typing import Final, Literal, ReadOnly, Self, TypedDict, override
 
 from mangadotnet_scraper.network import (
-    HttpClientProvider,
+    HttpClient,
     create_http_client,
     retryable_client_method,
 )
@@ -31,7 +31,7 @@ class MangaBakaEntryDataTitle(TypedDict):
 
 
 class MangaBakaApi(AbstractAsyncContextManager):
-    _client: Final[HttpClientProvider]
+    _client: Final[HttpClient]
 
     def __init__(self) -> None:
         self._client = create_http_client("https://api.mangabaka.org")

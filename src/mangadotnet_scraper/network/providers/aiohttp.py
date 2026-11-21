@@ -18,13 +18,13 @@ from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
 from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
 from mangadotnet_scraper.network.base import (
-    HttpClientProvider,
+    HttpClient,
     RequestInfo,
     Response,
 )
 
 
-class AioClientResponse(Response):
+class AioHttpClientResponse(Response):
     _response: Final[ClientResponse]
 
     def __init__(self, response: ClientResponse) -> None:
@@ -242,7 +242,7 @@ class RateLimitedMiddleware(Middleware):
             return await handler(request)
 
 
-class AioHttpClientProvider(HttpClientProvider):
+class AioHttpClient(HttpClient):
     _client: Final[ClientSession]
 
     def __init__(
@@ -298,7 +298,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.get(
                 url,
                 params=params,
@@ -317,7 +317,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.head(
                 url,
                 params=params,
@@ -338,7 +338,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.post(
                 url,
                 params=params,
@@ -361,7 +361,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.put(
                 url,
                 params=params,
@@ -384,7 +384,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.delete(
                 url,
                 params=params,
@@ -407,7 +407,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.options(
                 url,
                 params=params,
@@ -430,7 +430,7 @@ class AioHttpClientProvider(HttpClientProvider):
         headers: Mapping[str, str] | None = None,
         **kwargs,
     ) -> Response:
-        return AioClientResponse(
+        return AioHttpClientResponse(
             await self._client.patch(
                 url,
                 params=params,

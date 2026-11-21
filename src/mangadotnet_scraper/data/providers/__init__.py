@@ -1,3 +1,3 @@
-from .cysqlite import CySqliteDataProvider
+from .cysqlite import CySqliteData
 
-__all__ = ["CySqliteDataProvider"]
+__all__ = ["CySqliteData"]

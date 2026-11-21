@@ -1,12 +1,14 @@
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
 class VortexScansSourceProvider(IkenTemplate):
-    def __init__(self, config: ConfigProvider) -> None:
+    def __init__(self, config: Config, browser: Browser) -> None:
         super().__init__(
             config,
+            browser,
             group_name="Vortex Scans",
             source_id="en.vortex_scans",
             name="Vortex Scans",

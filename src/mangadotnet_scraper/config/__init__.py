@@ -1,3 +1,3 @@
-from .base import ConfigProvider
+from .base import Config
 
-__all__ = ["ConfigProvider"]
+__all__ = ["Config"]

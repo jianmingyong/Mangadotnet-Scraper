@@ -3,10 +3,10 @@ import logging
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from typing import Any, Final, override
 
-from mangadotnet_scraper.config.base import ConfigProvider
+from mangadotnet_scraper.config.base import Config
 
 
-class JsonConfigProvider(ConfigProvider):
+class JsonConfig(Config):
     _config_file: Final[str]
     _data: dict[str, Any]
 

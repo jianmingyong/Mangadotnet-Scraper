@@ -1,15 +1,21 @@
 from typing import Any, Literal, TypedDict
 
 from peewee import (
+    AutoField,
     BooleanField,
     IntegerField,
     JSONField,
     Model,
     TextField,
 )
-from playhouse.sqlite_ext import RowIDField
 
-from mangadotnet_scraper.sources.base import Chapter, Manga
+from mangadotnet_scraper.sources import Chapter, Manga
+
+__all__ = ["Source", "SourceEntry", "SourceEntryChapter", "TableVersion"]
+
+
+def _default_list() -> Any:
+    return []
 
 
 class TableVersion(Model):
@@ -28,10 +34,6 @@ class Source(Model):
     version = IntegerField(default=1)
 
 
-def _default_list() -> Any:
-    return []
-
-
 class SourceEntry(Model):
     class Meta:
         table_name = "source_entry"
@@ -40,7 +42,7 @@ class SourceEntry(Model):
             (("source_id", "link"), True),
         )
 
-    rowid = RowIDField()
+    rowid = AutoField(primary_key=True)
     source_id = TextField()
     manga_id = TextField()
     title = TextField()

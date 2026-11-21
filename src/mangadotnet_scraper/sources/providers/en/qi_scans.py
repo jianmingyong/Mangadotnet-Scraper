@@ -1,12 +1,14 @@
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.ezmanhwa import EzManhwaTemplate
 
 
 class QiScansSourceProvider(EzManhwaTemplate):
-    def __init__(self, config: ConfigProvider) -> None:
+    def __init__(self, config: Config, browser: Browser) -> None:
         super().__init__(
             config,
+            browser,
             group_name="Qi Manhwa",
             source_id="en.qi_scans",
             name="Qi Scans",

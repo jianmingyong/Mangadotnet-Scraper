@@ -1,3 +1,3 @@
-from .aiohttp import AioHttpClientProvider
+from .aiohttp import AioHttpClient
 
-__all__ = ["AioHttpClientProvider"]
+__all__ = ["AioHttpClient"]

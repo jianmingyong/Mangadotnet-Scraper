@@ -31,19 +31,24 @@ from rich.progress import (
 )
 from rich.rule import Rule
 
-from mangadotnet_scraper.config import ConfigProvider
-from mangadotnet_scraper.config.providers import JsonConfigProvider
-from mangadotnet_scraper.data import DataProvider
-from mangadotnet_scraper.data.entities import SourceEntry, SourceEntryChapter
-from mangadotnet_scraper.data.providers import CySqliteDataProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
+from mangadotnet_scraper.config.providers import JsonConfig
+from mangadotnet_scraper.data import Data, SourceEntry, SourceEntryChapter
+from mangadotnet_scraper.data.providers import CySqliteData
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
 from mangadotnet_scraper.mangadotnet_api import (
     MangaDotNetApi,
     MangaDotNetLoginRequestHandler,
 )
 from mangadotnet_scraper.network import HttpResponseError
-from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
-from mangadotnet_scraper.sources.base import Chapter, Page
+from mangadotnet_scraper.sources import (
+    Chapter,
+    Page,
+    SourceError,
+    SourceProvider,
+    SourceProviderInterface,
+)
 from mangadotnet_scraper.sources.providers import *
 
 
@@ -80,17 +85,19 @@ class LoginHandler(MangaDotNetLoginRequestHandler):
 
 
 class App(AbstractAsyncContextManager):
-    config: Final[ConfigProvider]
-    data: Final[DataProvider]
+    config: Final[Config]
+    data: Final[Data]
+    browser: Final[Browser]
     sources: Final[SourceProvider]
 
     mangabaka_api: Final[MangaBakaApi]
     mangadotnet_api: Final[MangaDotNetApi]
 
     def __init__(self) -> None:
-        self.config = JsonConfigProvider()
-        self.data = CySqliteDataProvider()
-        self.sources = SourceProvider(self.config)
+        self.config = JsonConfig()
+        self.data = CySqliteData()
+        self.browser = Browser()
+        self.sources = SourceProvider(self.config, self.browser)
 
         self.mangabaka_api = MangaBakaApi()
         self.mangadotnet_api = MangaDotNetApi(self.config)
@@ -106,6 +113,7 @@ class App(AbstractAsyncContextManager):
     async def exit(self) -> None:
         self.config.save()
         self.data.close()
+        await self.browser.close()
 
         await self.mangabaka_api.close()
         await self.mangadotnet_api.close()
@@ -115,6 +123,7 @@ class App(AbstractAsyncContextManager):
 
         self.config.load()
         self.data.initialize()
+        await self.browser.initialize()
 
         with Progress(
             SpinnerColumn(),
@@ -288,7 +297,9 @@ class App(AbstractAsyncContextManager):
                 case _:
                     break
 
-    async def fetch_source_listing(self, source: BaseSourceProvider) -> None:
+    async def fetch_source_listing(
+        self, source: SourceProviderInterface
+    ) -> None:
         with Progress(
             SpinnerColumn(),
             TextColumn("Fetching {task.description} Listing"),
@@ -297,6 +308,8 @@ class App(AbstractAsyncContextManager):
             progress.add_task(source.name, total=None)
 
             try:
+                new_entries = 0
+
                 async for manga in source.get_manga_list():
                     progress.print(
                         "Adding:",
@@ -309,6 +322,7 @@ class App(AbstractAsyncContextManager):
                     )
 
                     if result:
+                        new_entries += 1
                         logging.getLogger(__name__).info(
                             '[%s] Added: "%s" into source entry.',
                             source.source_id,
@@ -322,11 +336,11 @@ class App(AbstractAsyncContextManager):
                         )
 
                 progress.print(
-                    f"Done fetching {source.name} Listing",
+                    f"Done fetching {source.name} Listing. New Entries: {new_entries}",
                     markup=False,
                     highlight=False,
                 )
-            except Exception:
+            except SourceError:
                 progress.print(
                     f"Error fetching {source.name} Listing",
                     markup=False,
@@ -337,7 +351,7 @@ class App(AbstractAsyncContextManager):
                 )
 
     async def fetch_source_listing_details(
-        self, source: BaseSourceProvider, skip_mapping: bool = False
+        self, source: SourceProviderInterface, skip_mapping: bool = False
     ) -> None:
         total_progress = Progress(
             TextColumn("Fetching {task.description} Details"),
@@ -354,11 +368,11 @@ class App(AbstractAsyncContextManager):
             Group(Rule(), total_progress, Rule(), current_progress),
             transient=True,
         ):
-            listing = [
-                *self.data.get_source_entries(
+            listing = list(
+                self.data.get_source_entries(
                     source.source_id, order_by="title"
                 )
-            ]
+            )
 
             total_progress_task_id = total_progress.add_task(
                 source.name, total=len(listing)
@@ -367,15 +381,15 @@ class App(AbstractAsyncContextManager):
             semaphore = Semaphore(self.config.fetch_concurrency)
 
             async def fetch_manga_detail_task(
-                source_entry: SourceEntry,
+                entry: SourceEntry,
             ) -> None:
                 async with semaphore:
-                    task_id = current_progress.add_task(source_entry.title)
+                    task_id = current_progress.add_task(entry.title)
 
                     try:
                         if (
-                            source_entry.mangadotnet_id is None
-                            and not source_entry.manual_mapping_override
+                            entry.mangadotnet_id is None
+                            and not entry.manual_mapping_override
                             and not skip_mapping
                         ):
                             need_mapping = True
@@ -383,55 +397,49 @@ class App(AbstractAsyncContextManager):
                             need_mapping = False
 
                         manga = await source.get_manga_update(
-                            source_entry.to_manga(), need_mapping
+                            entry.to_manga(), need_mapping
                         )
 
                         if need_mapping:
-                            source_entry.alt_titles = "\n".join(
-                                manga.alt_titles
-                            )
+                            entry.alt_titles = "\n".join(manga.alt_titles)
 
-                            if source_entry.mangabaka_id is None:
-                                source_entry.mangabaka_id = (
+                            if entry.mangabaka_id is None:
+                                entry.mangabaka_id = (
                                     await self.mangabaka_api.get_id_by_title(
                                         [manga.title, *manga.alt_titles]
                                     )
                                 )
 
-                            if source_entry.mangadotnet_id is None:
-                                source_entry.mangadotnet_id = (
+                            if entry.mangadotnet_id is None:
+                                entry.mangadotnet_id = (
                                     await self.mangadotnet_api.get_id_by_title(
                                         [manga.title, *manga.alt_titles]
                                     )
                                 )
 
                                 if (
-                                    source_entry.mangadotnet_id is None
-                                    and source_entry.mangabaka_id is not None
+                                    entry.mangadotnet_id is None
+                                    and entry.mangabaka_id is not None
                                 ):
-                                    source_entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
-                                        source_entry.mangabaka_id
+                                    entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                        entry.mangabaka_id
                                     )
 
-                                    if source_entry.mangadotnet_id is None:
-                                        source_entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
-                                            source_entry.mangabaka_id
+                                    if entry.mangadotnet_id is None:
+                                        entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                            entry.mangabaka_id
                                         )
 
                         # Mapping Done, Check chapters now.
-                        await self.update_chapters(
-                            source_entry, manga.chapters
-                        )
+                        await self.update_chapters(entry, manga.chapters)
 
-                        self.data.update_source_entry(source_entry)
+                        self.data.update_source_entry(entry)
                     except Exception:
-                        total_progress.print(
-                            f"Error fetching {source_entry.title}"
-                        )
+                        total_progress.print(f"Error fetching {entry.title}")
                         logging.getLogger(__name__).exception(
                             "[%s] Error fetching %s",
                             source.source_id,
-                            source_entry.title,
+                            entry.title,
                         )
                     finally:
                         current_progress.remove_task(task_id)
@@ -456,30 +464,30 @@ class App(AbstractAsyncContextManager):
                 )
 
     async def update_chapters(
-        self, source_entry: SourceEntry, chapters: Sequence[Chapter]
+        self, entry: SourceEntry, chapters: Sequence[Chapter]
     ) -> None:
         new_chapters = []
 
-        if source_entry.mangadotnet_id is None:
+        if entry.mangadotnet_id is None:
             for chapter in chapters:
-                new_chapter = source_entry.get_chapter(chapter)
+                new_chapter = entry.get_chapter(chapter)
                 new_chapter["is_uploaded"] = False
                 new_chapters.append(new_chapter)
 
-            source_entry.chapters = new_chapters
+            entry.chapters = new_chapters
         else:
             mangadotnet_chapters = (
                 await self.mangadotnet_api.get_chapters_by_id(
-                    source_entry.mangadotnet_id
+                    entry.mangadotnet_id
                 )
             )
 
             mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
-                source_entry.mangadotnet_id
+                entry.mangadotnet_id
             )
 
             for chapter in chapters:
-                new_chapter = source_entry.get_chapter(chapter)
+                new_chapter = entry.get_chapter(chapter)
                 found = False
 
                 match chapter.type:
@@ -528,7 +536,7 @@ class App(AbstractAsyncContextManager):
                 new_chapter["is_uploaded"] = found
                 new_chapters.append(new_chapter)
 
-            source_entry.chapters = new_chapters
+            entry.chapters = new_chapters
 
     async def show_settings_menu(self) -> None:
         while True:
@@ -570,12 +578,14 @@ class App(AbstractAsyncContextManager):
                 case _:
                     break
 
-    async def manual_source_editing(self, source: BaseSourceProvider) -> None:
+    async def manual_source_editing(
+        self, source: SourceProviderInterface
+    ) -> None:
         async def show_initial_menu() -> None:
             while True:
-                entries = [
-                    *self.data.get_source_entries(source.source_id, "title")
-                ]
+                entries = list(
+                    self.data.get_source_entries(source.source_id, "title")
+                )
 
                 choices = [
                     Choice(
@@ -840,7 +850,7 @@ class App(AbstractAsyncContextManager):
 
         await show_initial_menu()
 
-    async def upload_chapters(self, source: BaseSourceProvider) -> None:
+    async def upload_chapters(self, source: SourceProviderInterface) -> None:
         total_progress = Progress(
             TextColumn("Upload {task.description} Overall"),
             BarColumn(bar_width=None),

@@ -1,3 +1,3 @@
-from .json import JsonConfigProvider
+from .json import JsonConfig
 
-__all__ = ["JsonConfigProvider"]
+__all__ = ["JsonConfig"]

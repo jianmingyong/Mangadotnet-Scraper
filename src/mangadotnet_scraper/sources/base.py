@@ -7,23 +7,21 @@ from typing import (
     Final,
     Literal,
     NotRequired,
+    Protocol,
     Required,
     Self,
     TypedDict,
     Unpack,
-    cast,
     final,
     override,
 )
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
-from camoufox import AsyncCamoufox
-from playwright.async_api import Browser, Error
 
-from mangadotnet_scraper.camoufox_utils import create_browser
-from mangadotnet_scraper.config import ConfigProvider
+from mangadotnet_scraper.camoufox_utils import Browser
+from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
-    HttpClientProvider,
+    HttpClient,
     create_http_client,
     retryable_client_method,
 )
@@ -120,8 +118,43 @@ class SourceInfo(TypedDict):
     limiter: NotRequired[LeakyBucketLimiter | Limiter | StrictLimiter]
 
 
+class SourceProviderInterface(Protocol):
+    source_id: Final[str]
+    name: Final[str]
+    version: Final[int]
+    languages: Final[Sequence[str]]
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(self, *args) -> None: ...
+
+    def get_manga_list(self) -> AsyncGenerator[Manga]: ...
+
+    async def get_manga_update(
+        self,
+        manga: Manga,
+        need_details: bool = True,
+        need_chapters: bool = True,
+    ) -> Manga: ...
+
+    async def get_page_list(
+        self,
+        manga: Manga,
+        chapter: Chapter,
+    ) -> Sequence[Page]: ...
+
+    def get_image_request(self, page: Page) -> ImageRequest: ...
+
+    async def download_image(self, request: ImageRequest) -> bytes: ...
+
+    async def process_page_image(self, image: bytes, page: Page) -> bytes: ...
+
+    async def handle_manga_migration(self, manga: Manga) -> Manga: ...
+
+
 class BaseSourceProvider(AbstractAsyncContextManager):
-    config: Final[ConfigProvider]
+    config: Final[Config]
+    browser: Final[Browser]
 
     source_id: Final[str]
     name: Final[str]
@@ -140,17 +173,16 @@ class BaseSourceProvider(AbstractAsyncContextManager):
 
     settings: Mapping[str, Any]
 
-    client: HttpClientProvider
-
-    _camoufox: AsyncCamoufox | None
-    _browser: Browser | None
+    client: HttpClient
 
     def __init__(
         self,
-        config: ConfigProvider,
+        config: Config,
+        browser: Browser,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
         self.config = config
+        self.browser = browser
 
         self.source_id = kwargs["source_id"]
         self.name = kwargs["name"]
@@ -181,12 +213,12 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         await self.close()
 
     @classmethod
-    def create_provider(cls, config: ConfigProvider) -> Self:
+    def create_provider(cls, config: Config, browser: Browser) -> Self:
         if cls is BaseSourceProvider:
             raise ValueError("Cannot initialize base module.")
 
         # pyrefly: ignore [missing-argument]
-        return cls(config)
+        return cls(config, browser)
 
     @final
     async def initialize(self) -> None:
@@ -194,9 +226,9 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         self.base_url = self.settings.get("base_url", self.base_urls[0])
 
         if self.base_api_urls is not None:
-            self.base_api_url = self.settings.get(
-                "base_api_url", self.base_api_urls[0]
-            )
+            self.base_api_url = self.base_api_urls[
+                self.base_urls.index(self.base_url)
+            ]
 
         await self._on_initialize()
 
@@ -210,22 +242,12 @@ class BaseSourceProvider(AbstractAsyncContextManager):
             base_url, self.user_agent, self.headers, self.cookies, self.limiter
         )
 
-        self._camoufox = None
-        self._browser = None
+    async def close(self) -> None:
+        if self.limiter is not None:
+            self.limiter.close()
 
-    @final
-    async def get_browser(self) -> Browser:
-        if self._camoufox is None and self._browser is None:
-            try:
-                self._camoufox = create_browser()
-                self._browser = cast(Browser, await self._camoufox.start())
-            except Error:
-                if self._camoufox is not None:
-                    await self._camoufox.__aexit__()
-                self._camoufox = None
-                raise
-
-        return cast(Browser, self._browser)
+        if self.client is not None:
+            await self.client.close()
 
     @final
     @retryable_client_method
@@ -244,21 +266,6 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         async with await self.client.get(url, params, **kwargs) as response:
             response.raise_for_status()
             return await response.json()
-
-    async def close(self) -> None:
-        if self.limiter is not None:
-            self.limiter.close()
-
-        if self.client is not None:
-            await self.client.close()
-
-        if self._browser is not None:
-            await self._browser.close()
-            self._browser = None
-
-        if self._camoufox is not None:
-            await self._camoufox.__aexit__()
-            self._camoufox = None
 
     @final
     async def get_manga_list(self) -> AsyncGenerator[Manga]:

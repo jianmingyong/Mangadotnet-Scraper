@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from mangadotnet_scraper.data.entities import SourceEntry
+if TYPE_CHECKING:
+    from .entities import SourceEntry
 
 
-class DataProvider(ABC):
+class Data(ABC):
     def initialize(self) -> None:
         pass
 
@@ -37,7 +38,6 @@ class DataProvider(ABC):
         self,
         source_id: str,
         order_by: Literal["rowid", "title"] = "rowid",
-        order: Literal["ASC", "DESC"] = "ASC",
     ) -> Iterator[SourceEntry]:
         """
         Get all source entries by source id.

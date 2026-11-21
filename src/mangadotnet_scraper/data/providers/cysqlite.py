@@ -1,15 +1,15 @@
 from collections.abc import Iterator
 from typing import Final, Literal, override
 
-from peewee import IntegrityError, fn
+from peewee import IntegrityError
 from playhouse.cysqlite_ext import CySqliteDatabase
 from playhouse.migrate import SchemaMigrator, SqliteMigrator, migrate
 
-from mangadotnet_scraper.data import DataProvider
+from mangadotnet_scraper.data import Data
 from mangadotnet_scraper.data.entities import Source, SourceEntry, TableVersion
 
 
-class CySqliteDataProvider(DataProvider):
+class CySqliteData(Data):
     database: Final[CySqliteDatabase]
 
     def __init__(self, database: str = "data.db") -> None:
@@ -61,7 +61,7 @@ class CySqliteDataProvider(DataProvider):
                             chapters
                         ) SELECT
                             rowid,
-                            module_id,
+                            CONCAT('en.', module_id),
                             manga_id,
                             link,
                             title,
@@ -78,10 +78,6 @@ class CySqliteDataProvider(DataProvider):
                     migrator.drop_table("module_chapter"),
                     migrator.drop_table("module_manga"),
                 )
-
-                SourceEntry.update(
-                    source_id=fn.CONCAT("en.", SourceEntry.source_id)
-                ).execute()
 
                 TableVersion.delete().where(
                     # pyrefly: ignore[bad-argument-count]
@@ -126,7 +122,6 @@ class CySqliteDataProvider(DataProvider):
         self,
         source_id: str,
         order_by: Literal["rowid", "title"] = "rowid",
-        order: Literal["ASC", "DESC"] = "ASC",
     ) -> Iterator[SourceEntry]:
         match order_by:
             case "rowid":
@@ -134,13 +129,6 @@ class CySqliteDataProvider(DataProvider):
 
             case "title":
                 _order_by = SourceEntry.title
-
-        match order:
-            case "ASC":
-                _order_by = _order_by.asc()
-
-            case "DESC":
-                _order_by = _order_by.desc()
 
         return (
             SourceEntry.select()

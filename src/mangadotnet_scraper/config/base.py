@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
-class ConfigProvider(ABC):
+class Config(ABC):
     @property
     def mangadotnet_username(self) -> str | None:
         return self.get_config("mangadotnet_username")
