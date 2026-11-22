@@ -55,7 +55,7 @@ class CySqliteData(Data):
                             title,
                             alt_titles,
                             mangabaka_id,
-                            mangadotnet_id,
+                            mangadot_id,
                             manual_mapping_override,
                             skip_upload,
                             chapters

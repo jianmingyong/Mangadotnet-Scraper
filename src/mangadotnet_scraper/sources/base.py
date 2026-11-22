@@ -57,19 +57,6 @@ class Chapter:
     title: str
     link: str
 
-    @classmethod
-    def from_dict(cls, dict: Mapping[str, Any]) -> Chapter:
-        return Chapter(
-            id=dict["id"],
-            language=dict["language"],
-            group=dict["group"],
-            type=dict["type"],
-            volume_number=dict.get("volume_number"),
-            chapter_number=dict.get("chapter_number"),
-            title=dict["title"],
-            link=dict["link"],
-        )
-
     def copy(self) -> Chapter:
         return Chapter(
             self.id,

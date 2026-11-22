@@ -1,8 +1,9 @@
 import logging
-from asyncio import Semaphore, TaskGroup
-from collections.abc import MutableMapping, Sequence
+from asyncio import Semaphore, TaskGroup, sleep
+from collections.abc import Mapping, MutableMapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from io import BytesIO
+from time import monotonic
 from typing import (
     Final,
     Self,
@@ -37,13 +38,15 @@ from mangadotnet_scraper.config.providers import JsonConfig
 from mangadotnet_scraper.data import Data, SourceEntry, SourceEntryChapter
 from mangadotnet_scraper.data.providers import CySqliteData
 from mangadotnet_scraper.mangabaka_api import MangaBakaApi
-from mangadotnet_scraper.mangadotnet_api import (
-    MangaDotNetApi,
-    MangaDotNetLoginRequestHandler,
+from mangadotnet_scraper.mangadot_api import (
+    MangaDotApi,
+    MangaDotLoginRequestHandler,
+    MangaDotTusUploadMetadata,
 )
 from mangadotnet_scraper.network import HttpResponseError
 from mangadotnet_scraper.sources import (
     Chapter,
+    Manga,
     Page,
     SourceError,
     SourceProvider,
@@ -52,7 +55,7 @@ from mangadotnet_scraper.sources import (
 from mangadotnet_scraper.sources.providers import *
 
 
-class LoginHandler(MangaDotNetLoginRequestHandler):
+class LoginHandler(MangaDotLoginRequestHandler):
     _progress: Final[Progress]
 
     def __init__(self, progress: Progress) -> None:
@@ -91,7 +94,7 @@ class App(AbstractAsyncContextManager):
     sources: Final[SourceProvider]
 
     mangabaka_api: Final[MangaBakaApi]
-    mangadotnet_api: Final[MangaDotNetApi]
+    mangadotnet_api: Final[MangaDotApi]
 
     def __init__(self) -> None:
         self.config = JsonConfig()
@@ -100,7 +103,7 @@ class App(AbstractAsyncContextManager):
         self.sources = SourceProvider(self.config, self.browser)
 
         self.mangabaka_api = MangaBakaApi()
-        self.mangadotnet_api = MangaDotNetApi(self.config)
+        self.mangadotnet_api = MangaDotApi(self.config)
 
     @override
     async def __aenter__(self) -> Self:
@@ -388,7 +391,7 @@ class App(AbstractAsyncContextManager):
 
                     try:
                         if (
-                            entry.mangadotnet_id is None
+                            entry.mangadot_id is None
                             and not entry.manual_mapping_override
                             and not skip_mapping
                         ):
@@ -401,7 +404,7 @@ class App(AbstractAsyncContextManager):
                         )
 
                         if need_mapping:
-                            entry.alt_titles = "\n".join(manga.alt_titles)
+                            await self.update_details(entry, manga)
 
                             if entry.mangabaka_id is None:
                                 entry.mangabaka_id = (
@@ -410,23 +413,23 @@ class App(AbstractAsyncContextManager):
                                     )
                                 )
 
-                            if entry.mangadotnet_id is None:
-                                entry.mangadotnet_id = (
+                            if entry.mangadot_id is None:
+                                entry.mangadot_id = (
                                     await self.mangadotnet_api.get_id_by_title(
                                         [manga.title, *manga.alt_titles]
                                     )
                                 )
 
                                 if (
-                                    entry.mangadotnet_id is None
+                                    entry.mangadot_id is None
                                     and entry.mangabaka_id is not None
                                 ):
-                                    entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                    entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
                                         entry.mangabaka_id
                                     )
 
-                                    if entry.mangadotnet_id is None:
-                                        entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                    if entry.mangadot_id is None:
+                                        entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
                                             entry.mangabaka_id
                                         )
 
@@ -462,81 +465,6 @@ class App(AbstractAsyncContextManager):
                 logging.getLogger().exception(
                     f"Error fetching {source.name} Listing Details"
                 )
-
-    async def update_chapters(
-        self, entry: SourceEntry, chapters: Sequence[Chapter]
-    ) -> None:
-        new_chapters = []
-
-        if entry.mangadotnet_id is None:
-            for chapter in chapters:
-                new_chapter = entry.get_chapter(chapter)
-                new_chapter["is_uploaded"] = False
-                new_chapters.append(new_chapter)
-
-            entry.chapters = new_chapters
-        else:
-            mangadotnet_chapters = (
-                await self.mangadotnet_api.get_chapters_by_id(
-                    entry.mangadotnet_id
-                )
-            )
-
-            mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
-                entry.mangadotnet_id
-            )
-
-            for chapter in chapters:
-                new_chapter = entry.get_chapter(chapter)
-                found = False
-
-                match chapter.type:
-                    case "chapter":
-                        for mangadotnet_chapter in mangadotnet_chapters:
-                            if mangadotnet_chapter.get(
-                                "language"
-                            ) == new_chapter.get(
-                                "language"
-                            ) and mangadotnet_chapter.get(
-                                "chapter_number"
-                            ) == new_chapter.get("chapter_number"):
-                                for group in mangadotnet_chapter.get(
-                                    "groups", []
-                                ):
-                                    if group.get("name") == new_chapter.get(
-                                        "group"
-                                    ):
-                                        found = True
-                                        break
-
-                            if found:
-                                break
-
-                    case "volume":
-                        for mangadotnet_volume in mangadotnet_volumes:
-                            if mangadotnet_volume.get(
-                                "language"
-                            ) == new_chapter.get(
-                                "language"
-                            ) and mangadotnet_volume.get(
-                                "volume_number"
-                            ) == new_chapter.get("volume_number"):
-                                for group in mangadotnet_volume.get(
-                                    "groups", []
-                                ):
-                                    if group.get("name") == new_chapter.get(
-                                        "group"
-                                    ):
-                                        found = True
-                                        break
-
-                            if found:
-                                break
-
-                new_chapter["is_uploaded"] = found
-                new_chapters.append(new_chapter)
-
-            entry.chapters = new_chapters
 
     async def show_settings_menu(self) -> None:
         while True:
@@ -589,7 +517,7 @@ class App(AbstractAsyncContextManager):
 
                 choices = [
                     Choice(
-                        f"[{entry.mangadotnet_id or 'NULL'}] {entry.title}",
+                        f"[{entry.mangadot_id or 'NULL'}] [{len(entry.chapters)} Ch.] {entry.title}",
                         entry.rowid,
                     )
                     for entry in entries
@@ -630,13 +558,13 @@ class App(AbstractAsyncContextManager):
                 print("Link:", entry.link)
 
                 print("MangaBaka Id:", entry.mangabaka_id or "NULL")
-                print("MangaDot Id:", entry.mangadotnet_id or "NULL")
+                print("MangaDot Id:", entry.mangadot_id or "NULL")
                 print("Skip Upload:", entry.skip_upload)
 
                 can_modify = None
                 can_upload = None
 
-                if entry.mangadotnet_id is None:
+                if entry.mangadot_id is None:
                     can_upload = "Cannot upload when MangaDot Id is NULL"
 
                 if len(entry.chapters) == 0:
@@ -721,23 +649,23 @@ class App(AbstractAsyncContextManager):
 
                         progress.update(task, task="MangaDotNet Entry")
 
-                        if entry.mangadotnet_id is None:
-                            entry.mangadotnet_id = (
+                        if entry.mangadot_id is None:
+                            entry.mangadot_id = (
                                 await self.mangadotnet_api.get_id_by_title(
                                     titles
                                 )
                             )
 
                             if (
-                                entry.mangadotnet_id is None
+                                entry.mangadot_id is None
                                 and entry.mangabaka_id is not None
                             ):
-                                entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
                                     entry.mangabaka_id
                                 )
 
-                                if entry.mangadotnet_id is None:
-                                    entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                if entry.mangadot_id is None:
+                                    entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
                                         entry.mangabaka_id
                                     )
 
@@ -775,12 +703,12 @@ class App(AbstractAsyncContextManager):
                             progress.update(task, task="MangaDotNet Entry")
 
                             try:
-                                entry.mangadotnet_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
                                     id
                                 )
 
-                                if entry.mangadotnet_id is None:
-                                    entry.mangadotnet_id = await self.mangadotnet_api.create_from_mangabaka(
+                                if entry.mangadot_id is None:
+                                    entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
                                         id
                                     )
                             except HttpResponseError:
@@ -816,7 +744,7 @@ class App(AbstractAsyncContextManager):
 
                             try:
                                 await self.mangadotnet_api.get_entry_by_id(id)
-                                entry.mangadotnet_id = id
+                                entry.mangadot_id = id
                             except HttpResponseError:
                                 progress.print(
                                     "Unable to find mangadotnet entry"
@@ -840,12 +768,9 @@ class App(AbstractAsyncContextManager):
 
                 manga = await source.get_manga_update(entry.to_manga())
 
-                entry.manga_id = manga.id
-                entry.title = manga.title
-                entry.alt_titles = "\n".join(manga.alt_titles)
-                entry.link = manga.link
-
+                await self.update_details(entry, manga)
                 await self.update_chapters(entry, manga.chapters)
+
                 self.data.update_source_entry(entry)
 
         await show_initial_menu()
@@ -887,14 +812,14 @@ class App(AbstractAsyncContextManager):
             entries_to_upload = []
 
             for entry in self.data.get_source_entries(source.source_id):
-                if entry.mangadotnet_id is None or entry.mangadotnet_id == 0:
+                if entry.mangadot_id is None or entry.mangadot_id == 0:
                     continue
 
                 for chapter in entry.chapters:
-                    chapter: SourceEntryChapter
-                    if not chapter.get(
-                        "skip_upload", False
-                    ) and not chapter.get("is_uploaded", False):
+                    chapter = SourceEntryChapter.from_dict(
+                        cast(Mapping, chapter)
+                    )
+                    if not chapter.skip_upload and not chapter.is_uploaded:
                         entries_to_upload.append(entry)
                         break
 
@@ -906,82 +831,35 @@ class App(AbstractAsyncContextManager):
             )
 
             for entry in entries_to_upload:
-                current_progress_title.update(
-                    current_progress_title_task,
-                    status=f"Uploading: {entry.title}",
-                    count=0,
-                )
-
-                chapters_to_upload = []
-
-                for chapter in entry.chapters:
-                    chapter: SourceEntryChapter
-                    if (
-                        not chapter.get("skip_upload", False)
-                        and not chapter.get("is_uploaded", False)
-                    ) and (
-                        chapter["type"] == "chapter"
-                        and chapter["chapter_number"] is not None
-                        or chapter["type"] == "volume"
-                        and chapter["volume_number"] is not None
-                    ):
-                        chapters_to_upload.append(chapter)
-
-                current_progress_title.update(
-                    current_progress_title_task, count=len(chapters_to_upload)
-                )
-
-                upload_semaphore = Semaphore(self.config.upload_concurrency)
 
                 async def upload_task(
                     semaphore: Semaphore,
                     entry: SourceEntry,
                     chapter: SourceEntryChapter,
                 ) -> None:
-                    try:
-                        async with semaphore:
-                            match chapter["type"]:
-                                case "chapter":
-                                    chapter_text = f"{entry.mangadotnet_id}:{chapter['language']}:{chapter['chapter_number']} [{chapter['group']}]"
+                    async with semaphore:
+                        match chapter.type:
+                            case "chapter":
+                                chapter_text = f"{entry.mangadot_id}:{chapter.override_language or chapter.language}:Ch. {chapter.override_chapter_number or chapter.chapter_number}:{chapter.override_group or chapter.group}"
 
-                                case "volume":
-                                    chapter_text = f"{entry.mangadotnet_id}:{chapter['language']}:{chapter['volume_number']} [{chapter['group']}]"
+                            case "volume":
+                                chapter_text = f"{entry.mangadot_id}:{chapter.override_language or chapter.language}:Vol. {chapter.override_volume_number or chapter.volume_number}:{chapter.override_group or chapter.group}"
 
-                            task_id = current_progress.add_task(
-                                "",
-                                start=False,
-                                total=None,
-                                chapter=chapter_text,
-                                status="Fetching Manga Pages...",
-                            )
+                        task_id = current_progress.add_task(
+                            "",
+                            start=False,
+                            total=None,
+                            chapter=chapter_text,
+                            status="Fetching Manga Pages...",
+                        )
 
+                        try:
                             pages = await source.get_page_list(
-                                entry.to_manga(), Chapter.from_dict(chapter)
+                                entry.to_manga(), chapter.to_chapter()
                             )
 
                             if len(pages) == 0:
-                                match chapter["type"]:
-                                    case "chapter":
-                                        logging.getLogger(__name__).exception(
-                                            "Fetch Failure [%s]: %s:%s:%s %s [%s]",
-                                            entry.rowid,
-                                            entry.mangadotnet_id,
-                                            chapter["language"],
-                                            chapter["chapter_number"],
-                                            chapter["title"],
-                                            chapter["group"],
-                                        )
-
-                                    case "volume":
-                                        logging.getLogger(__name__).exception(
-                                            "Fetch Failure [%s]: %s:%s:%s %s [%s]",
-                                            entry.rowid,
-                                            entry.mangadotnet_id,
-                                            chapter["language"],
-                                            chapter["volume_number"],
-                                            chapter["title"],
-                                            chapter["group"],
-                                        )
+                                self.log_chapter_error("Fetch", entry, chapter)
                                 return
 
                             current_progress.update(
@@ -1031,28 +909,9 @@ class App(AbstractAsyncContextManager):
                                 has_error = True
 
                             if has_error:
-                                match chapter["type"]:
-                                    case "chapter":
-                                        logging.getLogger(__name__).exception(
-                                            "Download Failure [%s]: %s:%s:%s %s [%s]",
-                                            entry.rowid,
-                                            entry.mangadotnet_id,
-                                            chapter["language"],
-                                            chapter["chapter_number"],
-                                            chapter["title"],
-                                            chapter["group"],
-                                        )
-
-                                    case "volume":
-                                        logging.getLogger(__name__).exception(
-                                            "Download Failure [%s]: %s:%s:%s %s [%s]",
-                                            entry.rowid,
-                                            entry.mangadotnet_id,
-                                            chapter["language"],
-                                            chapter["volume_number"],
-                                            chapter["title"],
-                                            chapter["group"],
-                                        )
+                                self.log_chapter_error(
+                                    "Download Failure", entry, chapter
+                                )
                                 return
 
                             zip_file_size = zip_buffer.tell()
@@ -1063,36 +922,394 @@ class App(AbstractAsyncContextManager):
                                 total=zip_file_size,
                                 status="Preparing Upload (1)",
                             )
-                    except Exception:
-                        match chapter["type"]:
-                            case "chapter":
-                                logging.getLogger(__name__).exception(
-                                    "Upload Failure [%s]: %s:%s:%s %s [%s]",
-                                    entry.rowid,
-                                    entry.mangadotnet_id,
-                                    chapter["language"],
-                                    chapter["chapter_number"],
-                                    chapter["title"],
-                                    chapter["group"],
+
+                            group_id = group_id_cache.get(
+                                chapter.override_group or chapter.group
+                            )
+
+                            if group_id is None:
+                                groups = (
+                                    await self.mangadotnet_api.get_group_ids(
+                                        chapter.override_group or chapter.group
+                                    )
                                 )
 
-                            case "volume":
-                                logging.getLogger(__name__).exception(
-                                    "Upload Failure [%s]: %s:%s:%s %s [%s]",
-                                    entry.rowid,
-                                    entry.mangadotnet_id,
-                                    chapter["language"],
-                                    chapter["volume_number"],
-                                    chapter["title"],
-                                    chapter["group"],
+                                for group in groups.get("groups", []):
+                                    if group.get("name") == (
+                                        chapter.override_group or chapter.group
+                                    ):
+                                        group_id = group.get("id")
+                                        group_id_cache[
+                                            chapter.override_group
+                                            or chapter.group
+                                        ] = group_id
+                                        break
+
+                            if group_id is None:
+                                self.log_chapter_error(
+                                    "Fetch Group Failure", entry, chapter
                                 )
-                    finally:
-                        current_progress.remove_task(task_id)
+                                return
+
+                            current_progress.update(
+                                task_id,
+                                completed=0,
+                                total=zip_file_size,
+                                status="Preparing Upload (2)",
+                            )
+
+                            try:
+                                location = (
+                                    await self.mangadotnet_api.prepare_upload(
+                                        zip_file_size,
+                                        MangaDotTusUploadMetadata(
+                                            cast(int, entry.mangadot_id),
+                                            chapter.override_chapter_number
+                                            or chapter.chapter_number,
+                                            chapter.override_volume_number
+                                            or chapter.volume_number,
+                                            chapter.override_language
+                                            or chapter.language,
+                                            chapter.override_title
+                                            or chapter.title,
+                                            [group_id],
+                                            None,
+                                            chapter.override_type
+                                            or chapter.type,
+                                            None,
+                                            False,
+                                        ),
+                                    )
+                                )
+
+                                def callable_progress(current: int) -> None:
+                                    current_progress.update(
+                                        task_id,
+                                        completed=current,
+                                        status="Uploading",
+                                    )
+
+                                current_progress.start_task(task_id)
+                                current_progress.update(
+                                    task_id, status="Uploading"
+                                )
+
+                                success = (
+                                    await self.mangadotnet_api.upload_file(
+                                        location, zip_buffer, callable_progress
+                                    )
+                                )
+
+                                current_progress.stop_task(task_id)
+                                current_progress.update(
+                                    task_id,
+                                    total=None,
+                                    status="Verify Upload (0s)",
+                                )
+
+                                if not success:
+                                    return
+
+                                found = False
+                                start_check = monotonic()
+
+                                while True:
+                                    uploaded_mangas = await self.mangadotnet_api.get_uploaded_manga(
+                                        cast(int, entry.mangadot_id)
+                                    )
+
+                                    for uploaded_manga in uploaded_mangas.get(
+                                        "uploads"
+                                    ):
+                                        if uploaded_manga.get("language") != (
+                                            chapter.override_language
+                                            or chapter.language
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get("type") != (
+                                            chapter.override_type
+                                            or chapter.type
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get(
+                                            "type"
+                                        ) == "chapter" and uploaded_manga.get(
+                                            "chapter_number"
+                                        ) != (
+                                            chapter.override_chapter_number
+                                            or chapter.chapter_number
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get(
+                                            "type"
+                                        ) == "volume" and uploaded_manga.get(
+                                            "volume_number"
+                                        ) != (
+                                            chapter.override_volume_number
+                                            or chapter.volume_number
+                                        ):
+                                            continue
+
+                                        for group in uploaded_manga.get(
+                                            "groups", []
+                                        ):
+                                            if group.get("name") == (
+                                                chapter.override_group
+                                                or chapter.group
+                                            ):
+                                                found = True
+                                                break
+
+                                        if found:
+                                            break
+
+                                    if found:
+                                        break
+
+                                    await sleep(1)
+
+                                    duration = monotonic() - start_check
+
+                                    current_progress.update(
+                                        task_id,
+                                        status=f"Verify Upload ({duration:.0f}s)",
+                                    )
+
+                                    if (
+                                        duration
+                                        > self.config.upload_verify_duration
+                                    ):
+                                        break
+
+                                if found:
+                                    chapter.is_uploaded = True
+                                    self.log_chapter_info(
+                                        "Upload Success", entry, chapter
+                                    )
+                                else:
+                                    self.log_chapter_info(
+                                        "Upload Failure", entry, chapter
+                                    )
+                            except HttpResponseError as error:
+                                if error.status == 409:
+                                    self.log_chapter_info(
+                                        "Upload Skipped (Already Uploaded)",
+                                        entry,
+                                        chapter,
+                                    )
+                                    chapter.is_uploaded = True
+                                else:
+                                    raise
+                        except Exception:  # noqa: BLE001
+                            self.log_chapter_error(
+                                "Upload Failure", entry, chapter
+                            )
+                        finally:
+                            current_progress.remove_task(task_id)
+
+                current_progress_title.update(
+                    current_progress_title_task,
+                    status=f"Uploading: {entry.title}",
+                    count=0,
+                )
+
+                upload_semaphore = Semaphore(self.config.upload_concurrency)
+
+                chapters = []
 
                 async with TaskGroup() as group:
+                    chapters_to_upload = []
+
+                    for chapter in entry.chapters:
+                        chapter = SourceEntryChapter.from_dict(chapter)
+                        chapters.append(chapter)
+
+                        if chapter.skip_upload or chapter.is_uploaded:
+                            continue
+
+                        if (
+                            chapter.type == "chapter"
+                            and (
+                                chapter.override_chapter_number
+                                or chapter.chapter_number
+                            )
+                            is None
+                        ):
+                            continue
+
+                        if (
+                            chapter.type == "volume"
+                            and (
+                                chapter.override_volume_number
+                                or chapter.volume_number
+                            )
+                            is None
+                        ):
+                            continue
+
+                        chapters_to_upload.append(chapter)
+
+                    current_progress_title.update(
+                        current_progress_title_task,
+                        count=len(chapters_to_upload),
+                    )
+
                     for chapter in chapters_to_upload:
                         group.create_task(
                             upload_task(upload_semaphore, entry, chapter)
                         )
 
+                entry.chapters = [chapter.to_dict() for chapter in chapters]
+                self.data.update_source_entry(entry)
+
+                total_progress.advance(total_progress_task)
+
             total_progress.print(f"Done upload {source.name}")
+
+    def log_chapter_info(
+        self, type: str, manga: SourceEntry, chapter: SourceEntryChapter
+    ) -> None:
+        match chapter.type:
+            case "chapter":
+                logging.getLogger(__name__).info(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_chapter_number or chapter.chapter_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+            case "volume":
+                logging.getLogger(__name__).info(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_volume_number or chapter.volume_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+    def log_chapter_error(
+        self, type: str, manga: SourceEntry, chapter: SourceEntryChapter
+    ) -> None:
+        match chapter.type:
+            case "chapter":
+                logging.getLogger(__name__).exception(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_chapter_number or chapter.chapter_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+            case "volume":
+                logging.getLogger(__name__).exception(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_volume_number or chapter.volume_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+    # Section Non UI Functions ----
+
+    async def update_details(self, entry: SourceEntry, manga: Manga) -> None:
+        entry.manga_id = manga.id
+        entry.title = manga.title
+        entry.alt_titles = "\n".join(manga.alt_titles)
+        entry.link = manga.link
+
+    async def update_chapters(
+        self, entry: SourceEntry, chapters: Sequence[Chapter]
+    ) -> None:
+        new_chapters = []
+
+        if entry.mangadot_id is None:
+            for chapter in chapters:
+                new_chapter = entry.get_chapter(chapter)
+                new_chapter.is_uploaded = False
+                new_chapters.append(new_chapter)
+        else:
+            mangadotnet_chapters = (
+                await self.mangadotnet_api.get_chapters_by_id(
+                    entry.mangadot_id
+                )
+            )
+
+            mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
+                entry.mangadot_id
+            )
+
+            for chapter in chapters:
+                new_chapter = entry.get_chapter(chapter)
+                found = False
+
+                match new_chapter.override_type or new_chapter.type:
+                    case "chapter":
+                        for mangadotnet_chapter in mangadotnet_chapters:
+                            if mangadotnet_chapter.get("language") != (
+                                new_chapter.override_language
+                                or new_chapter.language
+                            ):
+                                continue
+
+                            if mangadotnet_chapter.get("chapter_number") != (
+                                new_chapter.override_chapter_number
+                                or new_chapter.chapter_number
+                            ):
+                                continue
+
+                            for group in mangadotnet_chapter.get("groups", []):
+                                if group.get("name") == (
+                                    new_chapter.override_group
+                                    or new_chapter.group
+                                ):
+                                    found = True
+                                    break
+
+                            if found:
+                                break
+
+                    case "volume":
+                        for mangadotnet_volume in mangadotnet_volumes:
+                            if mangadotnet_volume.get("language") != (
+                                new_chapter.override_language
+                                or new_chapter.language
+                            ):
+                                continue
+
+                            if mangadotnet_volume.get("volume_number") != (
+                                new_chapter.override_volume_number
+                                or new_chapter.volume_number
+                            ):
+                                continue
+
+                            for group in mangadotnet_volume.get("groups", []):
+                                if group.get("name") == (
+                                    new_chapter.override_group
+                                    or new_chapter.group
+                                ):
+                                    found = True
+                                    break
+
+                            if found:
+                                break
+
+                new_chapter.is_uploaded = found
+                new_chapters.append(new_chapter)
+
+        entry.chapters = [chapter.to_dict() for chapter in new_chapters]
