@@ -1,14 +1,10 @@
-from mangadotnet_scraper.camoufox_utils import Browser
-from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
 class KenScansSourceProvider(IkenTemplate):
-    def __init__(self, config: Config, browser: Browser) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(
-            config,
-            browser,
             group_name="Kenscans",
             source_id="en.ken_scans",
             name="Ken Scans",
@@ -16,6 +12,7 @@ class KenScansSourceProvider(IkenTemplate):
             languages=["en"],
             base_url="https://kencomics.com",
             base_api_url="https://api.kencomics.com",
+            **kwargs,
         )
 
 

@@ -102,6 +102,9 @@ class SourceError(Exception):
 
 
 class SourceInfo(TypedDict):
+    config: NotRequired[Config]
+    browser: NotRequired[Browser]
+
     source_id: Required[str]
     name: Required[str]
     version: Required[int]
@@ -177,12 +180,10 @@ class BaseSourceProvider(AbstractAsyncContextManager):
 
     def __init__(
         self,
-        config: Config,
-        browser: Browser,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
-        self.config = config
-        self.browser = browser
+        self.config = kwargs["config"]
+        self.browser = kwargs["browser"]
 
         self.source_id = kwargs["source_id"]
         self.name = kwargs["name"]
@@ -213,12 +214,13 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         await self.close()
 
     @classmethod
-    def create_provider(cls, config: Config, browser: Browser) -> Self:
+    def create_provider(
+        cls, config: Config, browser: Browser, **kwargs
+    ) -> Self:
         if cls is BaseSourceProvider:
             raise ValueError("Cannot initialize base module.")
 
-        # pyrefly: ignore [missing-argument]
-        return cls(config, browser)
+        return cls(config=config, browser=browser, **kwargs)
 
     @final
     async def initialize(self) -> None:

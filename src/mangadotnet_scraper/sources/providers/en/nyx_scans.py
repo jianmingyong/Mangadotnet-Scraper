@@ -1,14 +1,10 @@
-from mangadotnet_scraper.camoufox_utils import Browser
-from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import SourceProvider
 from mangadotnet_scraper.sources.templates.iken import IkenTemplate
 
 
 class NyxScansSourceProvider(IkenTemplate):
-    def __init__(self, config: Config, browser: Browser) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(
-            config,
-            browser,
             group_name="Nyx Scans",
             source_id="en.nyx_scans",
             name="Nyx Scans",
@@ -16,6 +12,7 @@ class NyxScansSourceProvider(IkenTemplate):
             languages=["en"],
             base_url="https://nyxscans.com",
             base_api_url="https://api.nyxscans.com",
+            **kwargs,
         )
 
 

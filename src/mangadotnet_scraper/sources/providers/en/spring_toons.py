@@ -4,8 +4,6 @@ from typing import override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.camoufox_utils import Browser
-from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import BaseSourceProvider, SourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -20,15 +18,14 @@ from mangadotnet_scraper.utilities import dict_get_recursive
 class SpringToonsSourceProvider(BaseSourceProvider):
     GROUP_ID = "Spring Toons"
 
-    def __init__(self, config: Config, browser: Browser) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(
-            config,
-            browser,
             source_id="en.spring_toons",
             name="Spring Toons",
             version=1,
             languages=["en"],
             base_url="https://springtoons.org",
+            **kwargs,
         )
 
     def search_script(self, tag: Tag) -> bool:

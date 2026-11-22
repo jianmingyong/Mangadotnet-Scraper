@@ -1,8 +1,6 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Final, ReadOnly, TypedDict, Unpack, override
 
-from mangadotnet_scraper.camoufox_utils import Browser
-from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.sources import BaseSourceProvider
 from mangadotnet_scraper.sources.base import (
     Chapter,
@@ -76,12 +74,10 @@ class IkenTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: Config,
-        browser: Browser,
         group_name: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
-        super().__init__(config, browser, **kwargs)
+        super().__init__(**kwargs)
 
         self.group_name = group_name
 

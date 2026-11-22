@@ -887,12 +887,14 @@ class App(AbstractAsyncContextManager):
             entries_to_upload = []
 
             for entry in self.data.get_source_entries(source.source_id):
+                if entry.mangadotnet_id is None or entry.mangadotnet_id == 0:
+                    continue
+
                 for chapter in entry.chapters:
                     chapter: SourceEntryChapter
-                    if (
-                        not chapter["skip_upload"]
-                        and not chapter["is_uploaded"]
-                    ):
+                    if not chapter.get(
+                        "skip_upload", False
+                    ) and not chapter.get("is_uploaded", False):
                         entries_to_upload.append(entry)
                         break
 
@@ -915,8 +917,8 @@ class App(AbstractAsyncContextManager):
                 for chapter in entry.chapters:
                     chapter: SourceEntryChapter
                     if (
-                        not chapter["skip_upload"]
-                        and not chapter["is_uploaded"]
+                        not chapter.get("skip_upload", False)
+                        and not chapter.get("is_uploaded", False)
                     ) and (
                         chapter["type"] == "chapter"
                         and chapter["chapter_number"] is not None

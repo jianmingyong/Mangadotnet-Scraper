@@ -4,8 +4,6 @@ from typing import Any, Final, Unpack, cast, override
 
 from bs4 import BeautifulSoup, Tag
 
-from mangadotnet_scraper.camoufox_utils import Browser
-from mangadotnet_scraper.config import Config
 from mangadotnet_scraper.network import (
     HttpResponseError,
     retryable_client_method,
@@ -28,13 +26,11 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
 
     def __init__(
         self,
-        config: Config,
-        browser: Browser,
         group_name: str,
         base_cdn_url: str,
         **kwargs: Unpack[SourceInfo],
     ) -> None:
-        super().__init__(config, browser, **kwargs)
+        super().__init__(**kwargs)
 
         self.group_name = group_name
         self.base_cdn_url = base_cdn_url
