@@ -25,7 +25,7 @@ def clean_alt_titles(alt_title: str | None) -> list[str]:
 
 def clean_chapter_title(chapter: float, title: str | None = None) -> str:
     if title is None or title == "" or title == str(chapter):
-        return f"Chapter {chapter:.1f}".rstrip("0").rstrip(".")
+        return f"Chapter {chapter:.1f}".removesuffix(".0")
     else:
         return title
 

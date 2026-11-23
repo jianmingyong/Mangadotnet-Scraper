@@ -76,10 +76,6 @@ class EzManhwaTemplate(BaseSourceProvider):
         self.group_name = group_name
 
     @override
-    async def close(self) -> None:
-        await super().close()
-
-    @override
     async def _on_initialize(self) -> None:
         if self.user_agent is None:
             self.user_agent = self.browser.user_agent
@@ -223,7 +219,7 @@ class EzManhwaTemplate(BaseSourceProvider):
             if order is None or url is None:
                 continue
 
-            manga_pages.append(Page(order, url))
+            manga_pages.append(Page(page=order, link=url))
 
         return manga_pages
 

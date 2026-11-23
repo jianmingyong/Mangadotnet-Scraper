@@ -51,6 +51,7 @@ class ChaptersResponsePostChapter(TypedDict):
     number: ReadOnly[float]
     title: ReadOnly[str | None]
     isLocked: ReadOnly[bool]
+    price: ReadOnly[int]
 
 
 class ChapterResponse(TypedDict):
@@ -163,6 +164,9 @@ class IkenTemplate(BaseSourceProvider):
                 if dict_get_recursive(chapter, "isLocked", default=False):
                     continue
 
+                if dict_get_recursive(chapter, "price", default=0) > 0:
+                    continue
+
                 chapter_title: str | None = dict_get_recursive(
                     chapter, "title"
                 )
@@ -210,7 +214,7 @@ class IkenTemplate(BaseSourceProvider):
             if order is None or url is None:
                 continue
 
-            manga_pages.append(Page(order, url))
+            manga_pages.append(Page(page=order, link=url))
 
         return manga_pages
 
