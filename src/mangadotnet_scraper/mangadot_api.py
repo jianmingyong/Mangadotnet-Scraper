@@ -653,7 +653,7 @@ class MangaDotApi(AbstractAsyncContextManager):
                     match_target = match_target.casefold()
 
                     if len(match_target) > 20 and match_target.startswith(
-                        match_base[: floor(len(match_base) * 0.75)]
+                        match_base[: floor(len(match_base) * 0.9)]
                     ):
                         id = target_manga.get("id")
 
