@@ -77,12 +77,11 @@ class SourceEntry(Model):
             if (
                 chapter.language == target_chapter.language
                 and chapter.group == target_chapter.group
-                and chapter.type == target_chapter.type
                 and (
                     chapter.type == "chapter"
                     and chapter.chapter_number == target_chapter.chapter_number
                 )
-                and (
+                or (
                     chapter.type == "volume"
                     and chapter.volume_number == target_chapter.volume_number
                 )

@@ -517,7 +517,7 @@ class App(AbstractAsyncContextManager):
 
                 choices = [
                     Choice(
-                        f"[{entry.mangadot_id or 'NULL'}] [{len(entry.chapters)} Ch.] {entry.title}",
+                        f"[{entry.mangadot_id or 'NULL'}] [{entry.skip_upload}] {entry.title}",
                         entry.rowid,
                     )
                     for entry in entries
@@ -560,6 +560,7 @@ class App(AbstractAsyncContextManager):
                 print("MangaBaka Id:", entry.mangabaka_id or "NULL")
                 print("MangaDot Id:", entry.mangadot_id or "NULL")
                 print("Skip Upload:", entry.skip_upload)
+                print("Chapters:", len(entry.chapters))
 
                 can_modify = None
                 can_upload = None
@@ -603,6 +604,10 @@ class App(AbstractAsyncContextManager):
                         # Enable/Disable Upload
                         entry.skip_upload = not entry.skip_upload
                         self.data.update_source_entry(entry)
+
+                    case 5:
+                        # Modify Chapter
+                        await show_update_chapter_menu(entry)
 
                     case _:
                         break
@@ -718,6 +723,7 @@ class App(AbstractAsyncContextManager):
                                 break
 
                             entry.manual_mapping_override = True
+                            break
 
                 case 3:
                     while True:
@@ -752,6 +758,7 @@ class App(AbstractAsyncContextManager):
                                 break
 
                             entry.manual_mapping_override = True
+                            break
 
                 case _:
                     return
@@ -772,6 +779,154 @@ class App(AbstractAsyncContextManager):
                 await self.update_chapters(entry, manga.chapters)
 
                 self.data.update_source_entry(entry)
+
+        async def show_update_chapter_menu(entry: SourceEntry) -> None:
+            chapters = [
+                SourceEntryChapter.from_dict(chapter)
+                for chapter in entry.chapters
+            ]
+
+            while True:
+                choices = [
+                    Choice(
+                        f"[{chapter.language}] Vol. {chapter.volume_number or 0} Ch. {chapter.chapter_number or 0} {chapter.title} [{chapter.group}] [Skipped: {chapter.skip_upload}]",
+                        chapter,
+                    )
+                    for chapter in chapters
+                ]
+
+                selection = await questionary.select(
+                    f"{entry.title} - {len(chapters)} Chapters | Select chapter to edit:",
+                    choices=[
+                        *choices,
+                        Choice("Back", -1),
+                    ],
+                    use_jk_keys=False,
+                    use_search_filter=True,
+                ).ask_async()
+
+                if selection is None or selection == -1:
+                    entry.chapters = [
+                        chapter.to_dict() for chapter in chapters
+                    ]
+                    self.data.update_source_entry(entry)
+                    break
+                else:
+                    await show_chapter_menu(selection)
+
+        async def show_chapter_menu(chapter: SourceEntryChapter) -> None:
+            while True:
+                get_console().clear()
+                get_console().rule("Manual Source Entry Editor")
+
+                print(
+                    f"Language: {chapter.language} [Override: {chapter.override_language}]"
+                )
+                print(
+                    f"Group: {chapter.group} [Override: {chapter.override_group}]"
+                )
+                print(
+                    f"Type: {chapter.type} [Override: {chapter.override_type}]"
+                )
+                print(
+                    f"Volume Number: {chapter.volume_number} [Override: {chapter.override_volume_number}]"
+                )
+                print(
+                    f"Chapter Number: {chapter.chapter_number} [Override: {chapter.override_chapter_number}]"
+                )
+                print(
+                    f"Title: {chapter.title} [Override: {chapter.override_title}]"
+                )
+                print("Link:", chapter.link)
+                print("Is Uploaded:", chapter.is_uploaded)
+                print("Skip Upload:", chapter.skip_upload)
+
+                selection = await questionary.select(
+                    "What would you like to do?",
+                    choices=[
+                        # Choice("Update Language", 1),
+                        # Choice("Update Group", 2),
+                        # Choice("Update Type", 3),
+                        Choice("Update Volume", 4),
+                        Choice("Update Chapter", 5),
+                        Choice("Update Title", 6),
+                        Choice("Enable/Disable Upload", 7),
+                        Choice("Back", -1),
+                    ],
+                    use_shortcuts=True,
+                ).ask_async()
+
+                match selection:
+                    case 4:
+                        # Volume
+                        selection = await questionary.text(
+                            "Enter New Volume Number:",
+                            default=str(
+                                chapter.override_volume_number
+                                or chapter.volume_number
+                            ),
+                            validate=lambda x: all(
+                                (a in "0123456789.") for a in cast(str, x)
+                            ),
+                        ).ask_async()
+
+                        selection = float(selection)
+
+                        if selection is None or selection < 0:
+                            continue
+
+                        if (
+                            (chapter.override_title or chapter.title)
+                            == f"Volume {chapter.override_volume_number or chapter.volume_number}".removesuffix(
+                                ".0"
+                            )
+                        ):
+                            chapter.override_title = f"Volume {selection}"
+
+                        chapter.override_volume_number = selection
+
+                    case 5:
+                        # Chapter
+                        selection = await questionary.text(
+                            "Enter New Chapter Number:",
+                            default=str(
+                                chapter.override_chapter_number
+                                or chapter.chapter_number
+                            ),
+                            validate=lambda x: all(
+                                (a in "0123456789.") for a in cast(str, x)
+                            ),
+                        ).ask_async()
+
+                        selection = float(selection)
+
+                        if selection is None or selection < 0:
+                            continue
+
+                        if (
+                            (chapter.override_title or chapter.title)
+                            == f"Chapter {chapter.override_chapter_number or chapter.chapter_number}".removesuffix(
+                                ".0"
+                            )
+                        ):
+                            chapter.override_title = f"Chapter {selection}"
+
+                        chapter.override_chapter_number = selection
+
+                    case 6:
+                        # title
+                        selection = await questionary.text(
+                            "Enter New Title:",
+                            default=chapter.override_title or chapter.title,
+                        ).ask_async()
+
+                        chapter.override_title = selection
+
+                    case 7:
+                        chapter.skip_upload = not chapter.skip_upload
+
+                    case _:
+                        break
 
         await show_initial_menu()
 
@@ -813,6 +968,9 @@ class App(AbstractAsyncContextManager):
 
             for entry in self.data.get_source_entries(source.source_id):
                 if entry.mangadot_id is None or entry.mangadot_id == 0:
+                    continue
+
+                if entry.skip_upload:
                     continue
 
                 for chapter in entry.chapters:
@@ -859,7 +1017,9 @@ class App(AbstractAsyncContextManager):
                             )
 
                             if len(pages) == 0:
-                                self.log_chapter_error("Fetch", entry, chapter)
+                                self.log_chapter_error(
+                                    "Fetch Failure", entry, chapter
+                                )
                                 return
 
                             current_progress.update(
@@ -899,14 +1059,14 @@ class App(AbstractAsyncContextManager):
                                         )
                                         current_progress.advance(task_id)
 
-                            try:
-                                async with TaskGroup() as group:
-                                    for page in pages:
-                                        group.create_task(
-                                            download_image_task(page)
-                                        )
-                            except* Exception:  # noqa: BLE001
-                                has_error = True
+                                try:
+                                    async with TaskGroup() as group:
+                                        for page in pages:
+                                            group.create_task(
+                                                download_image_task(page)
+                                            )
+                                except* Exception:  # noqa: BLE001
+                                    has_error = True
 
                             if has_error:
                                 self.log_chapter_error(
@@ -1104,7 +1264,7 @@ class App(AbstractAsyncContextManager):
                                 else:
                                     raise
                         except Exception:  # noqa: BLE001
-                            self.log_chapter_error(
+                            self.log_chapter_exception(
                                 "Upload Failure", entry, chapter
                             )
                         finally:
@@ -1198,6 +1358,34 @@ class App(AbstractAsyncContextManager):
                 )
 
     def log_chapter_error(
+        self, type: str, manga: SourceEntry, chapter: SourceEntryChapter
+    ) -> None:
+        match chapter.type:
+            case "chapter":
+                logging.getLogger(__name__).error(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_chapter_number or chapter.chapter_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+            case "volume":
+                logging.getLogger(__name__).error(
+                    "%s [%s]: %s:%s:%s %s [%s]",
+                    type,
+                    manga.rowid,
+                    manga.mangadot_id,
+                    chapter.override_language or chapter.language,
+                    chapter.override_volume_number or chapter.volume_number,
+                    chapter.override_title or chapter.title,
+                    chapter.override_group or chapter.group,
+                )
+
+    def log_chapter_exception(
         self, type: str, manga: SourceEntry, chapter: SourceEntryChapter
     ) -> None:
         match chapter.type:
