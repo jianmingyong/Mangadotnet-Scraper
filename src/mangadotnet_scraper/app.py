@@ -557,10 +557,35 @@ class App(AbstractAsyncContextManager):
 
                 print("Link:", entry.link)
 
-                print("MangaBaka Id:", entry.mangabaka_id or "NULL")
-                print("MangaDot Id:", entry.mangadot_id or "NULL")
+                print(
+                    "MangaBaka Id:",
+                    entry.mangabaka_id or "NULL",
+                    f"[https://mangabaka.org/{entry.mangabaka_id}]"
+                    if entry.mangabaka_id
+                    else "",
+                )
+                print(
+                    "MangaDot Id:",
+                    entry.mangadot_id or "NULL",
+                    f"[https://mangadot.net/manga/{entry.mangadot_id}]"
+                    if entry.mangadot_id
+                    else "",
+                )
                 print("Skip Upload:", entry.skip_upload)
-                print("Chapters:", len(entry.chapters))
+
+                chapters_uploaded = 0
+
+                for chapter in entry.chapters:
+                    chapter = SourceEntryChapter.from_dict(chapter)
+
+                    if chapter.is_uploaded:
+                        chapters_uploaded += 1
+
+                print(
+                    "Chapters:",
+                    len(entry.chapters),
+                    f"({chapters_uploaded} Uploaded)",
+                )
 
                 can_modify = None
                 can_upload = None
