@@ -609,6 +609,10 @@ class App(AbstractAsyncContextManager):
                         # Modify Chapter
                         await show_update_chapter_menu(entry)
 
+                    case 6:
+                        # Upload
+                        await upload(entry)
+
                     case _:
                         break
 
@@ -930,6 +934,369 @@ class App(AbstractAsyncContextManager):
 
                     case _:
                         break
+
+        async def upload(entry: SourceEntry) -> None:
+            current_progress_title = Progress(
+                TextColumn("{task.fields[status]} ({task.fields[count]})")
+            )
+
+            current_progress = Progress(
+                SpinnerColumn(),
+                TextColumn(
+                    "[{task.fields[chapter]}] {task.fields[status]}",
+                    markup=False,
+                ),
+                BarColumn(),
+                TaskProgressColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+            )
+
+            group_id_cache: MutableMapping[str, int] = {}
+
+            with Live(
+                Group(
+                    Rule(),
+                    current_progress_title,
+                    Rule(),
+                    current_progress,
+                ),
+                transient=True,
+            ):
+
+                async def upload_task(
+                    semaphore: Semaphore,
+                    entry: SourceEntry,
+                    chapter: SourceEntryChapter,
+                ) -> None:
+                    async with semaphore:
+                        match chapter.type:
+                            case "chapter":
+                                chapter_text = f"{entry.mangadot_id}:{chapter.override_language or chapter.language}:Ch. {chapter.override_chapter_number or chapter.chapter_number}:{chapter.override_group or chapter.group}"
+
+                            case "volume":
+                                chapter_text = f"{entry.mangadot_id}:{chapter.override_language or chapter.language}:Vol. {chapter.override_volume_number or chapter.volume_number}:{chapter.override_group or chapter.group}"
+
+                        task_id = current_progress.add_task(
+                            "",
+                            start=False,
+                            total=None,
+                            chapter=chapter_text,
+                            status="Fetching Manga Pages...",
+                        )
+
+                        try:
+                            pages = await source.get_page_list(
+                                entry.to_manga(), chapter.to_chapter()
+                            )
+
+                            if len(pages) == 0:
+                                self.log_chapter_error(
+                                    "Fetch Failure", entry, chapter
+                                )
+                                return
+
+                            current_progress.update(
+                                task_id,
+                                total=len(pages),
+                                status="Downloading Image",
+                            )
+
+                            zip_buffer = BytesIO()
+                            has_error = False
+
+                            with ZipFile(
+                                zip_buffer, "a", ZIP_DEFLATED, compresslevel=9
+                            ) as zip_file:
+                                download_semaphore = Semaphore(
+                                    self.config.download_concurrency
+                                )
+
+                                async def download_image_task(
+                                    page: Page,
+                                ) -> None:
+                                    async with download_semaphore:
+                                        image = await source.download_image(
+                                            source.get_image_request(page)
+                                        )
+                                        image = (
+                                            await source.process_page_image(
+                                                image, page
+                                            )
+                                        )
+
+                                        raw_image = Image.open(BytesIO(image))
+
+                                        zip_file.writestr(
+                                            f"{page.page:03d}.{raw_image.format}",
+                                            image,
+                                        )
+                                        current_progress.advance(task_id)
+
+                                try:
+                                    async with TaskGroup() as group:
+                                        for page in pages:
+                                            group.create_task(
+                                                download_image_task(page)
+                                            )
+                                except* Exception:  # noqa: BLE001
+                                    has_error = True
+
+                            if has_error:
+                                self.log_chapter_error(
+                                    "Download Failure", entry, chapter
+                                )
+                                return
+
+                            zip_file_size = zip_buffer.tell()
+
+                            current_progress.update(
+                                task_id,
+                                completed=0,
+                                total=zip_file_size,
+                                status="Preparing Upload (1)",
+                            )
+
+                            group_id = group_id_cache.get(
+                                chapter.override_group or chapter.group
+                            )
+
+                            if group_id is None:
+                                groups = (
+                                    await self.mangadotnet_api.get_group_ids(
+                                        chapter.override_group or chapter.group
+                                    )
+                                )
+
+                                for group in groups.get("groups", []):
+                                    if group.get("name") == (
+                                        chapter.override_group or chapter.group
+                                    ):
+                                        group_id = group.get("id")
+                                        group_id_cache[
+                                            chapter.override_group
+                                            or chapter.group
+                                        ] = group_id
+                                        break
+
+                            if group_id is None:
+                                self.log_chapter_error(
+                                    "Fetch Group Failure", entry, chapter
+                                )
+                                return
+
+                            current_progress.update(
+                                task_id,
+                                completed=0,
+                                total=zip_file_size,
+                                status="Preparing Upload (2)",
+                            )
+
+                            try:
+                                location = (
+                                    await self.mangadotnet_api.prepare_upload(
+                                        zip_file_size,
+                                        MangaDotTusUploadMetadata(
+                                            cast(int, entry.mangadot_id),
+                                            chapter.override_chapter_number
+                                            or chapter.chapter_number,
+                                            chapter.override_volume_number
+                                            or chapter.volume_number,
+                                            chapter.override_language
+                                            or chapter.language,
+                                            chapter.override_title
+                                            or chapter.title,
+                                            [group_id],
+                                            None,
+                                            chapter.override_type
+                                            or chapter.type,
+                                            None,
+                                            False,
+                                        ),
+                                    )
+                                )
+
+                                def callable_progress(current: int) -> None:
+                                    current_progress.update(
+                                        task_id,
+                                        completed=current,
+                                        status="Uploading",
+                                    )
+
+                                current_progress.start_task(task_id)
+                                current_progress.update(
+                                    task_id, status="Uploading"
+                                )
+
+                                success = (
+                                    await self.mangadotnet_api.upload_file(
+                                        location, zip_buffer, callable_progress
+                                    )
+                                )
+
+                                current_progress.stop_task(task_id)
+                                current_progress.update(
+                                    task_id,
+                                    total=None,
+                                    status="Verify Upload (0s)",
+                                )
+
+                                if not success:
+                                    return
+
+                                found = False
+                                start_check = monotonic()
+
+                                while True:
+                                    uploaded_mangas = await self.mangadotnet_api.get_uploaded_manga(
+                                        cast(int, entry.mangadot_id)
+                                    )
+
+                                    for uploaded_manga in uploaded_mangas.get(
+                                        "uploads"
+                                    ):
+                                        if uploaded_manga.get("language") != (
+                                            chapter.override_language
+                                            or chapter.language
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get("type") != (
+                                            chapter.override_type
+                                            or chapter.type
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get(
+                                            "type"
+                                        ) == "chapter" and uploaded_manga.get(
+                                            "chapter_number"
+                                        ) != (
+                                            chapter.override_chapter_number
+                                            or chapter.chapter_number
+                                        ):
+                                            continue
+
+                                        if uploaded_manga.get(
+                                            "type"
+                                        ) == "volume" and uploaded_manga.get(
+                                            "volume_number"
+                                        ) != (
+                                            chapter.override_volume_number
+                                            or chapter.volume_number
+                                        ):
+                                            continue
+
+                                        for group in uploaded_manga.get(
+                                            "groups", []
+                                        ):
+                                            if group.get("name") == (
+                                                chapter.override_group
+                                                or chapter.group
+                                            ):
+                                                found = True
+                                                break
+
+                                        if found:
+                                            break
+
+                                    if found:
+                                        break
+
+                                    await sleep(1)
+
+                                    duration = monotonic() - start_check
+
+                                    current_progress.update(
+                                        task_id,
+                                        status=f"Verify Upload ({duration:.0f}s)",
+                                    )
+
+                                    if (
+                                        duration
+                                        > self.config.upload_verify_duration
+                                    ):
+                                        break
+
+                                if found:
+                                    chapter.is_uploaded = True
+                                    self.log_chapter_info(
+                                        "Upload Success", entry, chapter
+                                    )
+                                else:
+                                    self.log_chapter_info(
+                                        "Upload Failure", entry, chapter
+                                    )
+                            except HttpResponseError as error:
+                                if error.status == 409:
+                                    self.log_chapter_info(
+                                        "Upload Skipped (Already Uploaded)",
+                                        entry,
+                                        chapter,
+                                    )
+                                    chapter.is_uploaded = True
+                                else:
+                                    raise
+                        except Exception:  # noqa: BLE001
+                            self.log_chapter_exception(
+                                "Upload Failure", entry, chapter
+                            )
+                        finally:
+                            current_progress.remove_task(task_id)
+
+                current_progress_title_task = current_progress_title.add_task(
+                    "", total=None, status=f"Uploading: {entry.title}", count=0
+                )
+
+                upload_semaphore = Semaphore(self.config.upload_concurrency)
+
+                chapters = []
+
+                async with TaskGroup() as group:
+                    chapters_to_upload = []
+
+                    for chapter in entry.chapters:
+                        chapter = SourceEntryChapter.from_dict(chapter)
+                        chapters.append(chapter)
+
+                        if chapter.skip_upload or chapter.is_uploaded:
+                            continue
+
+                        if (
+                            chapter.type == "chapter"
+                            and (
+                                chapter.override_chapter_number
+                                or chapter.chapter_number
+                            )
+                            is None
+                        ):
+                            continue
+
+                        if (
+                            chapter.type == "volume"
+                            and (
+                                chapter.override_volume_number
+                                or chapter.volume_number
+                            )
+                            is None
+                        ):
+                            continue
+
+                        chapters_to_upload.append(chapter)
+
+                    current_progress_title.update(
+                        current_progress_title_task,
+                        count=len(chapters_to_upload),
+                    )
+
+                    for chapter in chapters_to_upload:
+                        group.create_task(
+                            upload_task(upload_semaphore, entry, chapter)
+                        )
+
+                entry.chapters = [chapter.to_dict() for chapter in chapters]
+                self.data.update_source_entry(entry)
 
         await show_initial_menu()
 
