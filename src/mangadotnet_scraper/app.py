@@ -625,7 +625,7 @@ class App(AbstractAsyncContextManager):
             ).ask_async()
 
             def check_for_int_or_skip(input: str) -> bool:
-                return input.isnumeric()
+                return all((c in "0123456789") for c in input)
 
             match selection:
                 case 1:
@@ -636,25 +636,24 @@ class App(AbstractAsyncContextManager):
                         ),
                         transient=True,
                     ) as progress:
-                        task = progress.add_task(
-                            "", total=None, task="MangaBaka Entry"
-                        )
+                        try:
+                            task = progress.add_task(
+                                "", total=None, task="MangaBaka Entry"
+                            )
 
-                        titles = [entry.title]
+                            titles = [entry.title]
 
-                        if entry.alt_titles is not None:
-                            titles.extend(entry.alt_titles.splitlines())
+                            if entry.alt_titles is not None:
+                                titles.extend(entry.alt_titles.splitlines())
 
-                        if entry.mangabaka_id is None:
                             entry.mangabaka_id = (
                                 await self.mangabaka_api.get_id_by_title(
                                     titles
                                 )
                             )
 
-                        progress.update(task, task="MangaDotNet Entry")
+                            progress.update(task, task="MangaDotNet Entry")
 
-                        if entry.mangadot_id is None:
                             entry.mangadot_id = (
                                 await self.mangadotnet_api.get_id_by_title(
                                     titles
@@ -673,15 +672,18 @@ class App(AbstractAsyncContextManager):
                                     entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
                                         entry.mangabaka_id
                                     )
+                        except HttpResponseError:
+                            logging.getLogger(__name__).error("Mapping error")
 
                 case 2:
                     while True:
                         id = await questionary.text(
                             "Enter MangaBaka Id (0 to cancel):",
+                            default=str(entry.mangabaka_id or ""),
                             validate=check_for_int_or_skip,
                         ).ask_async()
 
-                        if id is None:
+                        if id is None or id == 0:
                             break
                         else:
                             id = int(id)
@@ -729,10 +731,11 @@ class App(AbstractAsyncContextManager):
                     while True:
                         id = await questionary.text(
                             "Enter MangaDotNet Id (0 to cancel):",
+                            default=str(entry.mangadot_id or ""),
                             validate=check_for_int_or_skip,
                         ).ask_async()
 
-                        if id is None:
+                        if id is None or id == 0:
                             break
                         else:
                             id = int(id)
