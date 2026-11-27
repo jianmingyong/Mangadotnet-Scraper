@@ -73,6 +73,7 @@ class RenaScansSourceProvider(BaseSourceProvider):
                     "limit": 100,
                     "sort": "newest",
                 },
+                headers={"Referer": f"{self.base_url}/series"},
             )
 
             if not isinstance(json, Sequence):
@@ -105,7 +106,9 @@ class RenaScansSourceProvider(BaseSourceProvider):
         new_manga = manga.copy()
 
         slug = manga.link[manga.link.rindex("/") + 1 :]
-        json: MangaResponse = await self.get_json(f"/api/v1/manga/{slug}")
+        json: MangaResponse = await self.get_json(
+            f"/api/v1/manga/{slug}", headers={"Referer": manga.link}
+        )
 
         if need_details:
             new_manga.title = dict_get_recursive(
@@ -157,14 +160,18 @@ class RenaScansSourceProvider(BaseSourceProvider):
         manga_pages = []
 
         json: MangaPageResponse = await self.get_json(
-            f"/api/v1/chapters/{chapter.id}"
+            f"/api/v1/chapters/{chapter.id}", headers={"Referer": chapter.link}
         )
 
         for index, image in enumerate(
             dict_get_recursive(json, "content", default=[])
         ):
             manga_pages.append(
-                Page(page=index, link=f"https://renascans.net/uploads/{image}")
+                Page(
+                    page=index,
+                    link=f"https://renascans.net/uploads/{image}",
+                    context={"link": chapter.link},
+                )
             )
 
         return manga_pages
@@ -172,7 +179,8 @@ class RenaScansSourceProvider(BaseSourceProvider):
     @override
     def _on_get_image_request(self, page: Page) -> ImageRequest:
         return ImageRequest(
-            url=page.link, headers={"Referer": f"{self.base_url}/"}
+            url=page.link,
+            headers={"Referer": page.context.get("link", self.base_url)},
         )
 
 

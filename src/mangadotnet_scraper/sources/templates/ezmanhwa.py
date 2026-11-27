@@ -226,5 +226,6 @@ class EzManhwaTemplate(BaseSourceProvider):
     @override
     def _on_get_image_request(self, page: Page) -> ImageRequest:
         return ImageRequest(
-            url=page.link, headers={"Referer": f"{self.base_url}/"}
+            url=page.link,
+            headers={"Referer": f"{self.base_url}/"},
         )

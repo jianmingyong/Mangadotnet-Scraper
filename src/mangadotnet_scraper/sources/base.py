@@ -74,7 +74,7 @@ class Chapter:
 class Page:
     page: int
     link: str
-    context: Mapping[str, Any] | None = None
+    context: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

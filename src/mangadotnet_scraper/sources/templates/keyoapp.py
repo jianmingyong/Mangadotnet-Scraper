@@ -232,7 +232,12 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
                         image_link = f"{self.base_cdn_url}/series/webtoon/{manga.id}/chapters/{chapter.id}/revisions/{revision_id}/{page:03d}.jpg"
 
                     if await self.is_link_exist(image_link):
-                        pages.append(Page(page, image_link))
+                        pages.append(
+                            Page(
+                                page=page,
+                                link=image_link,
+                            )
+                        )
                         page += 1
                     else:
                         break
@@ -257,5 +262,6 @@ class KeyoAppLivewireTemplate(BaseSourceProvider):
     @override
     def _on_get_image_request(self, page: Page) -> ImageRequest:
         return ImageRequest(
-            url=page.link, headers={"Referer": f"{self.base_url}/"}
+            url=page.link,
+            headers={"Referer": f"{self.base_url}/"},
         )
