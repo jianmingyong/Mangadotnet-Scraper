@@ -5,6 +5,14 @@ from typing import Any
 from yarl import URL
 
 
+def is_digit(value: str) -> bool:
+    return all((v in "0123456789") for v in value) if value else False
+
+
+def is_numeric(value: str) -> bool:
+    return all((v in "0123456789.") for v in value) if value else False
+
+
 def clean_string(value: str) -> str:
     return "".join(c if c.isprintable() else " " for c in value).strip()
 

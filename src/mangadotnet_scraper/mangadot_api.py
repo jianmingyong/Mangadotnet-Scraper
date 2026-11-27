@@ -29,7 +29,6 @@ from aiohttp import (
     FormData,
 )
 from playwright.async_api import (
-    Browser,
     ElementHandle,
     Error,
     TimeoutError,
@@ -40,7 +39,7 @@ from playwright.async_api import (
 from playwright_captcha import ClickSolver, FrameworkType
 
 from mangadotnet_scraper.camoufox_utils import (
-    create_browser,
+    Browser,
     solve_cloudflare_captcha_interstitial,
     solve_cloudflare_captcha_turnstile,
 )
@@ -93,6 +92,7 @@ class MangaDotMangaEntryData(TypedDict):
     id: ReadOnly[int]
     title: ReadOnly[str]
     alt_titles: ReadOnly[Sequence[str]]
+    mangabaka_id: ReadOnly[int | None]
 
 
 class MangaDotChapterList(TypedDict):
@@ -287,10 +287,6 @@ class MangaDotLoginMiddleware(Middleware):
     def user_session_cookie(self) -> str | None:
         return self._config.mangadotnet_user_session
 
-    @user_session_cookie.setter
-    def user_session_cookie(self, value: str | None) -> None:
-        self._config.mangadotnet_user_session = value
-
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
@@ -321,43 +317,8 @@ class MangaDotApi(AbstractAsyncContextManager):
     ]
 
     _config: Final[Config]
+    _browser: Final[Browser]
     _client: Final[HttpClient]
-
-    @staticmethod
-    def _resolve_ptr_table_json(
-        table: list[Any], index: int
-    ) -> Any | list[Any] | dict[str, Any]:
-        if not isinstance(table, list):
-            return table
-
-        value = table[index]
-
-        if isinstance(value, dict):
-            result = {}
-            k: str
-            v: int
-            for k, v in value.items():
-                key = table[int(k.lstrip("_"))]
-                value_index = v
-                resolved_value = (
-                    MangaDotApi._resolve_ptr_table_json(table, value_index)
-                    if value_index >= 0
-                    else None
-                )
-                result[key] = resolved_value
-            return result
-        elif isinstance(value, list):
-            result = []
-            for v in value:
-                if v >= 0:
-                    result.append(
-                        MangaDotApi._resolve_ptr_table_json(table, v)
-                    )
-                else:
-                    result.append(None)
-            return result
-        else:
-            return value
 
     @staticmethod
     def _parse_metadata(metadata: dict[str, Any]) -> str:
@@ -382,19 +343,18 @@ class MangaDotApi(AbstractAsyncContextManager):
 
         return ",".join(data)
 
-    def __init__(
-        self,
-        config: Config,
-    ) -> None:
+    def __init__(self, config: Config, browser: Browser) -> None:
         self._config = config
+        self._browser = browser
         self._client = create_http_client(
+            browser,
             self._BASE_URL,
             middlewares=[
                 UserRateLimitMiddleware(),
                 ServerRateLimitMiddleware(),
                 RateLimitedMiddleware(),
                 MangaDotLoginMiddleware(config),
-                CloudflareMiddleware(),
+                CloudflareMiddleware(browser),
             ],
         )
 
@@ -412,9 +372,7 @@ class MangaDotApi(AbstractAsyncContextManager):
     async def login(self, handler: MangaDotLoginRequestHandler) -> bool:
         try:
             async with (
-                create_browser() as browser,
-                await cast(Browser, browser).new_context() as context,
-                await context.new_page() as page,
+                await self._browser.get_shared_context_page() as page,
                 ClickSolver(
                     framework=FrameworkType.CAMOUFOX, page=page
                 ) as solver,
@@ -428,7 +386,7 @@ class MangaDotApi(AbstractAsyncContextManager):
                     solver, page, response
                 ):
                     logging.getLogger(__name__).error(
-                        "[Camoufox] Failed to solve cloudflare captcha"
+                        "Failed to solve cloudflare captcha"
                     )
                     return False
 
@@ -477,7 +435,7 @@ class MangaDotApi(AbstractAsyncContextManager):
                         'form > button[type="submit"][class~="bg-[var(--primary)]"]:not(:disabled)',
                     ):
                         logging.getLogger(__name__).error(
-                            "[Camoufox] Failed to solve cloudflare captcha"
+                            "Failed to solve cloudflare captcha"
                         )
                         return False
 
@@ -485,7 +443,7 @@ class MangaDotApi(AbstractAsyncContextManager):
 
                     if await submit_button.count() == 0:
                         logging.getLogger(__name__).error(
-                            "[Camoufox] Log in button not found"
+                            "Log in button not found"
                         )
                         return False
 
@@ -578,7 +536,7 @@ class MangaDotApi(AbstractAsyncContextManager):
                     else:
                         break
 
-                cookies = await context.cookies(self._BASE_URL)
+                cookies = await page.context.cookies(self._BASE_URL)
 
                 for cookie in cookies:
                     if cookie.get("name") == self._AUTHENTICATION_COOKIE:
@@ -588,12 +546,12 @@ class MangaDotApi(AbstractAsyncContextManager):
                         return True
 
                 logging.getLogger(__name__).error(
-                    "[Camoufox] Unable to find the authentication cookie"
+                    "Unable to find the authentication cookie"
                 )
                 return False
         except Error:
             logging.getLogger(__name__).exception(
-                "[Camoufox] Failed to authenticate due to camoufox error"
+                "Failed to authenticate due to camoufox error"
             )
             return False
 

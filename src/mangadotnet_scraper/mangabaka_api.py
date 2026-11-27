@@ -4,6 +4,7 @@ from contextlib import AbstractAsyncContextManager
 from math import floor
 from typing import Final, Literal, ReadOnly, Self, TypedDict, override
 
+from mangadotnet_scraper.camoufox_utils import Browser
 from mangadotnet_scraper.network import (
     HttpClient,
     create_http_client,
@@ -33,8 +34,8 @@ class MangaBakaEntryDataTitle(TypedDict):
 class MangaBakaApi(AbstractAsyncContextManager):
     _client: Final[HttpClient]
 
-    def __init__(self) -> None:
-        self._client = create_http_client("https://api.mangabaka.org")
+    def __init__(self, browser: Browser) -> None:
+        self._client = create_http_client(browser, "https://api.mangabaka.org")
 
     @override
     async def __aenter__(self) -> Self:

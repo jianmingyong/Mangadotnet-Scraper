@@ -5,6 +5,8 @@ from functools import wraps
 
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
 
+from mangadotnet_scraper.camoufox_utils import Browser
+
 from .base import HttpClient, HttpResponseError, Response
 from .providers import AioHttpClient
 
@@ -66,6 +68,7 @@ def retryable_client_method[**P, R](
 
 
 def create_http_client(
+    browser: Browser,
     base_url: str | None = None,
     user_agent: str | None = None,
     headers: Mapping[str, str] | None = None,
@@ -74,5 +77,5 @@ def create_http_client(
     **kwargs,
 ) -> HttpClient:
     return AioHttpClient(
-        base_url, user_agent, headers, cookies, limiter, **kwargs
+        browser, base_url, user_agent, headers, cookies, limiter, **kwargs
     )

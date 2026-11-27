@@ -1,7 +1,7 @@
 import logging
 from abc import ABC
 from asyncio import Lock, sleep
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from time import time
 from typing import Any, Final, override
 
@@ -14,14 +14,26 @@ from aiohttp import (
     ClientSession,
     TCPConnector,
 )
+from aiohttp.hdrs import (
+    RETRY_AFTER,
+    USER_AGENT,
+    X_RATELIMIT_REMAINING,
+    X_RATELIMIT_RESET,
+)
 from asynciolimiter import LeakyBucketLimiter, Limiter, StrictLimiter
+from playwright.async_api import Error
+from playwright_captcha import ClickSolver, FrameworkType
 
-from mangadotnet_scraper.camoufox_utils import get_cloudflare_cookies
+from mangadotnet_scraper.camoufox_utils import (
+    Browser,
+    solve_cloudflare_captcha_interstitial,
+)
 from mangadotnet_scraper.network.base import (
     HttpClient,
     RequestInfo,
     Response,
 )
+from mangadotnet_scraper.utilities import is_digit
 
 
 class AioHttpClientResponse(Response):
@@ -95,43 +107,51 @@ class UserRateLimitMiddleware(Middleware):
 
 
 class ServerRateLimitMiddleware(Middleware):
-    _remaining_limit: int
-    _reset: int
+    _limits: Final[MutableMapping[str, tuple[int, int]]]
 
     def __init__(self) -> None:
-        self._remaining_limit = -1
-        self._reset = -1
+        self._limits = {}
 
     @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
-        if self._remaining_limit <= 1 and self._reset > 0:
-            await sleep(self._reset)
+        limit, reset = self._limits.get(request.url.path, (-1, -1))
+
+        if limit <= 1 and reset > 0:
+            logging.getLogger(__name__).info(
+                "Request rate limited (%s) Retrying after %s seconds.",
+                str(request.request_info.url),
+                reset,
+            )
+            await sleep(reset)
 
         response = await handler(request)
 
         remaining = response.headers.get(
-            "X-RateLimit-Remaining",
+            X_RATELIMIT_REMAINING,
             response.headers.get("RateLimit-Remaining"),
         )
 
-        if remaining is not None and remaining.isnumeric():
-            self._remaining_limit = int(remaining)
+        if remaining is not None and is_digit(remaining):
+            remaining_limit = int(remaining)
         else:
-            self._remaining_limit = -1
+            remaining_limit = -1
 
         reset = response.headers.get(
-            "X-RateLimit-Reset", response.headers.get("RateLimit-Reset")
+            X_RATELIMIT_RESET, response.headers.get("RateLimit-Reset")
         )
 
-        if reset is not None and reset.isnumeric():
-            self._reset = int(reset)
+        if reset is not None and is_digit(reset):
+            reset_timer = int(reset)
+            current_time = int(time())
 
-            if self._reset > time():
-                self._reset -= int(time())
+            if reset_timer > current_time:
+                reset_timer -= current_time
         else:
-            self._reset = -1
+            reset_timer = -1
+
+        self._limits.update({request.url.path: (remaining_limit, reset_timer)})
 
         return response
 
@@ -139,23 +159,69 @@ class ServerRateLimitMiddleware(Middleware):
 class CloudflareMiddleware(Middleware):
     _CLOUDFLARE_COOKIE_NAME = "cf_clearance"
 
-    _user_agent: str | None
-    _cookies: Final[dict[str, str]]
+    _browser: Final[Browser]
+    _cookies: Final[MutableMapping[str, str]]
     _lock: Final[Lock]
 
-    def __init__(self, user_agent: str | None = None) -> None:
-        self._user_agent = user_agent
+    _user_agent: str | None
+
+    def __init__(self, browser: Browser) -> None:
+        self._browser = browser
         self._cookies = {}
         self._lock = Lock()
+
+    async def get_cloudflare_cookies(self, url: str) -> str | None:
+        try:
+            async with (
+                await self._browser.new_context(self._user_agent) as context,
+                await context.new_page() as page,
+                ClickSolver(
+                    framework=FrameworkType.CAMOUFOX, page=page
+                ) as solver,
+            ):
+                response = await page.goto(url)
+                assert response is not None
+
+                if not await solve_cloudflare_captcha_interstitial(
+                    solver, page, response
+                ):
+                    logging.getLogger(__name__).error(
+                        "Failed to solve cloudflare captcha"
+                    )
+                    return None
+
+                cookies = await context.cookies(url)
+                cookie_value = None
+
+                for cookie in cookies:
+                    if cookie.get("name") == "cf_clearance":
+                        cookie_value = cookie.get("value")
+                        break
+
+                if cookie_value is None:
+                    return None
+
+            logging.getLogger(__name__).info(
+                "Cloudflare cookies obtained for user agent (%s): %s",
+                self._user_agent,
+                cookie_value,
+            )
+
+            return cookie_value
+        except Error:
+            logging.getLogger(__name__).exception(
+                "Failed to get cloudflare cookies due to camoufox error"
+            )
+            return None
 
     @override
     async def __call__(
         self, request: ClientRequest, handler: ClientHandlerType
     ) -> ClientResponse:
-        async def update_and_request() -> ClientResponse:
-            if self._user_agent is not None:
-                request.headers.update({"User-Agent": self._user_agent})
+        self._user_agent = request.headers.get(USER_AGENT)
+        assert self._user_agent is not None
 
+        async def update_and_request() -> ClientResponse:
             cookie = self._cookies.get(request.host)
 
             if cookie is not None:
@@ -174,24 +240,20 @@ class CloudflareMiddleware(Middleware):
             if response.headers.get("cf-mitigated") != "challenge":
                 return response
 
-            logging.getLogger(__name__).warning(
+            logging.getLogger(__name__).info(
                 "Response returned cloudflare challenge. Attempting to get cloudflare cookies."
             )
 
-            data = await get_cloudflare_cookies(
-                str(request.url), self._user_agent
-            )
+            data = await self.get_cloudflare_cookies(str(request.url))
 
             if data is not None:
-                self._user_agent = data[0]
-                self._cookies.update({request.host: data[1]})
+                self._cookies.update({request.host: data})
 
             return await update_and_request()
 
 
 class RateLimitedMiddleware(Middleware):
     _TOO_MANY_REQUEST_STATUS_CODE = 429
-    _RETRY_AFTER_HEADER = "Retry-After"
 
     _retry_wait_duration: Final[int]
     _lock: Final[Lock]
@@ -216,22 +278,24 @@ class RateLimitedMiddleware(Middleware):
                 return response
 
             retry_timer = response.headers.get(
-                self._RETRY_AFTER_HEADER,
+                RETRY_AFTER,
                 response.headers.get(
-                    "X-RateLimit-Reset",
+                    X_RATELIMIT_RESET,
                     response.headers.get("RateLimit-Reset"),
                 ),
             )
 
-            if retry_timer is not None and retry_timer.isnumeric():
+            if retry_timer is not None and is_digit(retry_timer):
                 retry_timer = int(retry_timer)
             else:
                 retry_timer = self._retry_wait_duration
 
-            if retry_timer > time():
-                retry_timer -= int(time())
+            current_time = int(time())
 
-            logging.getLogger(__name__).warning(
+            if retry_timer > current_time:
+                retry_timer -= current_time
+
+            logging.getLogger(__name__).info(
                 "Request rate limited (%s) Retrying after %s seconds.",
                 str(request.request_info.url),
                 retry_timer,
@@ -247,6 +311,7 @@ class AioHttpClient(HttpClient):
 
     def __init__(
         self,
+        browser: Browser,
         base_url: str | None = None,
         user_agent: str | None = None,
         headers: Mapping[str, str] | None = None,
@@ -263,13 +328,13 @@ class AioHttpClient(HttpClient):
             _headers.update(headers)
 
         if user_agent is not None:
-            _headers.update({"User-Agent": user_agent})
+            _headers.update({USER_AGENT: user_agent})
 
         middlewares = [
             UserRateLimitMiddleware(limiter),
             ServerRateLimitMiddleware(),
             RateLimitedMiddleware(),
-            CloudflareMiddleware(user_agent),
+            CloudflareMiddleware(browser),
         ]
 
         if kwargs.get("middlewares") is not None:

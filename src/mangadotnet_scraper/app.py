@@ -53,6 +53,7 @@ from mangadotnet_scraper.sources import (
     SourceProviderInterface,
 )
 from mangadotnet_scraper.sources.providers import *
+from mangadotnet_scraper.utilities import is_digit, is_numeric
 
 
 class LoginHandler(MangaDotLoginRequestHandler):
@@ -66,11 +67,11 @@ class LoginHandler(MangaDotLoginRequestHandler):
         self._progress.stop()
 
         username = await questionary.text(
-            "Please enter MangaDotNet Username:"
+            "Please enter MangaDot Username:"
         ).ask_async()
 
         password = await questionary.password(
-            "Please enter MangaDotNet Password:"
+            "Please enter MangaDot Password:"
         ).ask_async()
 
         return username, password
@@ -80,8 +81,8 @@ class LoginHandler(MangaDotLoginRequestHandler):
         self._progress.stop()
 
         otp = await questionary.text(
-            "Please enter MangaDotNet OTP (6 digits):",
-            validate=lambda x: len(x) == 6 and cast(str, x).isnumeric(),
+            "Please enter MangaDot OTP (6 digits):",
+            validate=lambda x: len(x) == 6 and is_digit(x),
         ).ask_async()
 
         return otp
@@ -94,7 +95,7 @@ class App(AbstractAsyncContextManager):
     sources: Final[SourceProvider]
 
     mangabaka_api: Final[MangaBakaApi]
-    mangadotnet_api: Final[MangaDotApi]
+    mangadot_api: Final[MangaDotApi]
 
     def __init__(self) -> None:
         self.config = JsonConfig()
@@ -102,8 +103,8 @@ class App(AbstractAsyncContextManager):
         self.browser = Browser()
         self.sources = SourceProvider(self.config, self.browser)
 
-        self.mangabaka_api = MangaBakaApi()
-        self.mangadotnet_api = MangaDotApi(self.config)
+        self.mangabaka_api = MangaBakaApi(self.browser)
+        self.mangadot_api = MangaDotApi(self.config, self.browser)
 
     @override
     async def __aenter__(self) -> Self:
@@ -119,7 +120,7 @@ class App(AbstractAsyncContextManager):
         await self.browser.close()
 
         await self.mangabaka_api.close()
-        await self.mangadotnet_api.close()
+        await self.mangadot_api.close()
 
     async def run(self) -> None:
         get_console().rule("MangaDotNet Scraper and Uploader")
@@ -137,11 +138,11 @@ class App(AbstractAsyncContextManager):
 
             while True:
                 try:
-                    await self.mangadotnet_api.get_user_profile()
+                    await self.mangadot_api.get_user_profile()
                     break
                 except HttpResponseError:
                     # User not logged in.
-                    if not await self.mangadotnet_api.login(
+                    if not await self.mangadot_api.login(
                         LoginHandler(progress)
                     ):
                         continue
@@ -415,7 +416,7 @@ class App(AbstractAsyncContextManager):
 
                             if entry.mangadot_id is None:
                                 entry.mangadot_id = (
-                                    await self.mangadotnet_api.get_id_by_title(
+                                    await self.mangadot_api.get_id_by_title(
                                         [manga.title, *manga.alt_titles]
                                     )
                                 )
@@ -424,12 +425,12 @@ class App(AbstractAsyncContextManager):
                                     entry.mangadot_id is None
                                     and entry.mangabaka_id is not None
                                 ):
-                                    entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                    entry.mangadot_id = await self.mangadot_api.get_id_from_mangabaka_id(
                                         entry.mangabaka_id
                                     )
 
                                     if entry.mangadot_id is None:
-                                        entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
+                                        entry.mangadot_id = await self.mangadot_api.create_from_mangabaka(
                                             entry.mangabaka_id
                                         )
 
@@ -653,9 +654,6 @@ class App(AbstractAsyncContextManager):
                 use_shortcuts=True,
             ).ask_async()
 
-            def check_for_int_or_skip(input: str) -> bool:
-                return all((c in "0123456789") for c in input)
-
             match selection:
                 case 1:
                     with Progress(
@@ -681,24 +679,22 @@ class App(AbstractAsyncContextManager):
                                 )
                             )
 
-                            progress.update(task, task="MangaDotNet Entry")
+                            progress.update(task, task="MangaDot Entry")
 
                             entry.mangadot_id = (
-                                await self.mangadotnet_api.get_id_by_title(
-                                    titles
-                                )
+                                await self.mangadot_api.get_id_by_title(titles)
                             )
 
                             if (
                                 entry.mangadot_id is None
                                 and entry.mangabaka_id is not None
                             ):
-                                entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                entry.mangadot_id = await self.mangadot_api.get_id_from_mangabaka_id(
                                     entry.mangabaka_id
                                 )
 
                                 if entry.mangadot_id is None:
-                                    entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
+                                    entry.mangadot_id = await self.mangadot_api.create_from_mangabaka(
                                         entry.mangabaka_id
                                     )
                         except HttpResponseError:
@@ -709,7 +705,7 @@ class App(AbstractAsyncContextManager):
                         id = await questionary.text(
                             "Enter MangaBaka Id (0 to cancel):",
                             default=str(entry.mangabaka_id or ""),
-                            validate=check_for_int_or_skip,
+                            validate=is_digit,
                         ).ask_async()
 
                         if id is None or id == 0:
@@ -730,26 +726,26 @@ class App(AbstractAsyncContextManager):
 
                             try:
                                 await self.mangabaka_api.get_series_by_id(id)
-                            except HttpResponseError as error:
-                                progress.print(
-                                    error, markup=False, highlight=False
+                            except HttpResponseError:
+                                logging.getLogger(__name__).error(
+                                    "Unable to get mangabaka series"
                                 )
                                 continue
 
-                            progress.update(task, task="MangaDotNet Entry")
+                            progress.update(task, task="MangaDot Entry")
 
                             try:
-                                entry.mangadot_id = await self.mangadotnet_api.get_id_from_mangabaka_id(
+                                entry.mangadot_id = await self.mangadot_api.get_id_from_mangabaka_id(
                                     id
                                 )
 
                                 if entry.mangadot_id is None:
-                                    entry.mangadot_id = await self.mangadotnet_api.create_from_mangabaka(
+                                    entry.mangadot_id = await self.mangadot_api.create_from_mangabaka(
                                         id
                                     )
                             except HttpResponseError:
-                                progress.print(
-                                    "Unable to create mangadotnet id. Please try again later"
+                                logging.getLogger(__name__).error(
+                                    "Unable to create mangadot id"
                                 )
                                 break
 
@@ -761,7 +757,7 @@ class App(AbstractAsyncContextManager):
                         id = await questionary.text(
                             "Enter MangaDotNet Id (0 to cancel):",
                             default=str(entry.mangadot_id or ""),
-                            validate=check_for_int_or_skip,
+                            validate=is_digit,
                         ).ask_async()
 
                         if id is None or id == 0:
@@ -777,15 +773,15 @@ class App(AbstractAsyncContextManager):
                             transient=True,
                         ) as progress:
                             task = progress.add_task(
-                                "", total=None, task="MangaDotNet Entry"
+                                "", total=None, task="MangaDot Entry"
                             )
 
                             try:
-                                await self.mangadotnet_api.get_entry_by_id(id)
+                                await self.mangadot_api.get_entry_by_id(id)
                                 entry.mangadot_id = id
                             except HttpResponseError:
-                                progress.print(
-                                    "Unable to find mangadotnet entry"
+                                logging.getLogger(__name__).error(
+                                    "Unable to find mangadot entry"
                                 )
                                 break
 
@@ -805,12 +801,15 @@ class App(AbstractAsyncContextManager):
             ) as progress:
                 progress.add_task(entry.title, total=None)
 
-                manga = await source.get_manga_update(entry.to_manga())
+                try:
+                    manga = await source.get_manga_update(entry.to_manga())
 
-                await self.update_details(entry, manga)
-                await self.update_chapters(entry, manga.chapters)
+                    await self.update_details(entry, manga)
+                    await self.update_chapters(entry, manga.chapters)
 
-                self.data.update_source_entry(entry)
+                    self.data.update_source_entry(entry)
+                except Exception:
+                    logging.getLogger(__name__).error("Unable to update entry")
 
         async def show_update_chapter_menu(entry: SourceEntry) -> None:
             chapters = [
@@ -897,9 +896,7 @@ class App(AbstractAsyncContextManager):
                                 chapter.override_volume_number
                                 or chapter.volume_number
                             ),
-                            validate=lambda x: all(
-                                (a in "0123456789.") for a in cast(str, x)
-                            ),
+                            validate=is_numeric,
                         ).ask_async()
 
                         selection = float(selection)
@@ -925,9 +922,7 @@ class App(AbstractAsyncContextManager):
                                 chapter.override_chapter_number
                                 or chapter.chapter_number
                             ),
-                            validate=lambda x: all(
-                                (a in "0123456789.") for a in cast(str, x)
-                            ),
+                            validate=is_numeric,
                         ).ask_async()
 
                         selection = float(selection)
@@ -1088,10 +1083,8 @@ class App(AbstractAsyncContextManager):
                             )
 
                             if group_id is None:
-                                groups = (
-                                    await self.mangadotnet_api.get_group_ids(
-                                        chapter.override_group or chapter.group
-                                    )
+                                groups = await self.mangadot_api.get_group_ids(
+                                    chapter.override_group or chapter.group
                                 )
 
                                 for group in groups.get("groups", []):
@@ -1120,7 +1113,7 @@ class App(AbstractAsyncContextManager):
 
                             try:
                                 location = (
-                                    await self.mangadotnet_api.prepare_upload(
+                                    await self.mangadot_api.prepare_upload(
                                         zip_file_size,
                                         MangaDotTusUploadMetadata(
                                             cast(int, entry.mangadot_id),
@@ -1154,10 +1147,8 @@ class App(AbstractAsyncContextManager):
                                     task_id, status="Uploading"
                                 )
 
-                                success = (
-                                    await self.mangadotnet_api.upload_file(
-                                        location, zip_buffer, callable_progress
-                                    )
+                                success = await self.mangadot_api.upload_file(
+                                    location, zip_buffer, callable_progress
                                 )
 
                                 current_progress.stop_task(task_id)
@@ -1174,7 +1165,7 @@ class App(AbstractAsyncContextManager):
                                 start_check = monotonic()
 
                                 while True:
-                                    uploaded_mangas = await self.mangadotnet_api.get_uploaded_manga(
+                                    uploaded_mangas = await self.mangadot_api.get_uploaded_manga(
                                         cast(int, entry.mangadot_id)
                                     )
 
@@ -1483,10 +1474,8 @@ class App(AbstractAsyncContextManager):
                             )
 
                             if group_id is None:
-                                groups = (
-                                    await self.mangadotnet_api.get_group_ids(
-                                        chapter.override_group or chapter.group
-                                    )
+                                groups = await self.mangadot_api.get_group_ids(
+                                    chapter.override_group or chapter.group
                                 )
 
                                 for group in groups.get("groups", []):
@@ -1515,7 +1504,7 @@ class App(AbstractAsyncContextManager):
 
                             try:
                                 location = (
-                                    await self.mangadotnet_api.prepare_upload(
+                                    await self.mangadot_api.prepare_upload(
                                         zip_file_size,
                                         MangaDotTusUploadMetadata(
                                             cast(int, entry.mangadot_id),
@@ -1549,10 +1538,8 @@ class App(AbstractAsyncContextManager):
                                     task_id, status="Uploading"
                                 )
 
-                                success = (
-                                    await self.mangadotnet_api.upload_file(
-                                        location, zip_buffer, callable_progress
-                                    )
+                                success = await self.mangadot_api.upload_file(
+                                    location, zip_buffer, callable_progress
                                 )
 
                                 current_progress.stop_task(task_id)
@@ -1569,7 +1556,7 @@ class App(AbstractAsyncContextManager):
                                 start_check = monotonic()
 
                                 while True:
-                                    uploaded_mangas = await self.mangadotnet_api.get_uploaded_manga(
+                                    uploaded_mangas = await self.mangadot_api.get_uploaded_manga(
                                         cast(int, entry.mangadot_id)
                                     )
 
@@ -1827,13 +1814,11 @@ class App(AbstractAsyncContextManager):
                 new_chapter.is_uploaded = False
                 new_chapters.append(new_chapter)
         else:
-            mangadotnet_chapters = (
-                await self.mangadotnet_api.get_chapters_by_id(
-                    entry.mangadot_id
-                )
+            mangadotnet_chapters = await self.mangadot_api.get_chapters_by_id(
+                entry.mangadot_id
             )
 
-            mangadotnet_volumes = await self.mangadotnet_api.get_volumes_by_id(
+            mangadotnet_volumes = await self.mangadot_api.get_volumes_by_id(
                 entry.mangadot_id
             )
 

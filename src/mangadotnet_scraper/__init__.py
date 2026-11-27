@@ -16,6 +16,7 @@ def initialize() -> None:
         filename="mangadotnet_scraper.log",
         encoding="utf-8",
     )
+
     logging.getLogger("peewee").setLevel(logging.INFO)
 
     try:

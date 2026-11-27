@@ -228,7 +228,12 @@ class BaseSourceProvider(AbstractAsyncContextManager):
         )
 
         self.client = create_http_client(
-            base_url, self.user_agent, self.headers, self.cookies, self.limiter
+            self.browser,
+            base_url,
+            self.user_agent,
+            self.headers,
+            self.cookies,
+            self.limiter,
         )
 
     async def close(self) -> None:

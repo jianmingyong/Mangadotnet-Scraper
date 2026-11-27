@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import sys
 from asyncio import create_task, sleep, wait
 from contextlib import AbstractAsyncContextManager
@@ -9,12 +8,10 @@ from camoufox import AsyncCamoufox
 from playwright.async_api import Browser as PlaywrightBrowser
 from playwright.async_api import (
     BrowserContext,
-    Error,
     Page,
     Response,
-    TimeoutError,
 )
-from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
+from playwright_captcha import CaptchaType, ClickSolver
 from playwright_captcha.utils.camoufox_add_init_script.add_init_script import (
     get_addon_path,
 )
@@ -62,6 +59,12 @@ class Browser(AbstractAsyncContextManager):
 
         return self._browser_context
 
+    async def get_shared_context_page(self) -> Page:
+        if self._browser_context.is_closed():
+            self._browser_context = await self.new_context()
+
+        return await self._browser_context.new_page()
+
 
 def create_browser(
     headless: bool | Literal["virtual"] = True, **launch_options
@@ -97,7 +100,15 @@ async def solve_cloudflare_captcha_interstitial(
             'head > script[src^="https://challenges.cloudflare.com/turnstile/"]'
         )
 
-        while await locator.count() > 0:
+        while not page.is_closed() and await locator.count() > 0:
+            script_src = await locator.get_attribute("src")
+
+            if script_src is not None and script_src.startswith(
+                "https://challenges.cloudflare.com/turnstile/v0/api.js"
+            ):
+                # This is a different turnstile so we can assume that it is already loaded.
+                break
+
             await sleep(1)
 
     async def run_solve_cloudflare_captcha() -> None:
@@ -113,9 +124,9 @@ async def solve_cloudflare_captcha_interstitial(
         await wait([task, task2], return_when=asyncio.FIRST_COMPLETED)
 
         if task2.done():
-            task.cancel()
+            await wait(task, timeout=30)
 
-        if task2.done() and not task2.cancelled() and task2.exception():
+        if task2.done() and task2.exception():
             return False
 
         if task.done():
@@ -136,11 +147,10 @@ async def solve_cloudflare_captcha_turnstile(
             await sleep(1)
 
         while True:
-            try:
-                if await locator.input_value(timeout=1000) != "":
-                    break
-            except TimeoutError:
-                pass
+            if await locator.input_value() != "":
+                break
+
+            await sleep(1)
 
     async def run_solve_cloudflare_captcha() -> None:
         await solver.solve_captcha(
@@ -155,62 +165,12 @@ async def solve_cloudflare_captcha_turnstile(
     await wait([task, task2], return_when=asyncio.FIRST_COMPLETED)
 
     if task2.done():
-        task.cancel()
+        await wait(task, timeout=30)
 
-    if task2.done() and not task2.cancelled() and task2.exception():
+    if task2.done() and task2.exception():
         return False
 
     if task.done():
         task2.cancel()
 
     return True
-
-
-async def get_cloudflare_cookies(
-    url: str, user_agent: str | None = None
-) -> tuple[str, str] | None:
-    try:
-        async with (
-            create_browser() as browser,
-            await cast(PlaywrightBrowser, browser).new_context(
-                user_agent=user_agent
-            ) as context,
-            await context.new_page() as page,
-            ClickSolver(framework=FrameworkType.CAMOUFOX, page=page) as solver,
-        ):
-            response = cast(Response, await page.goto(url))
-
-            if not await solve_cloudflare_captcha_interstitial(
-                solver, page, response
-            ):
-                logging.getLogger(__name__).error(
-                    "[Camoufox] Failed to solve cloudflare captcha"
-                )
-                return None
-
-            if user_agent is None:
-                user_agent = await page.evaluate("navigator.userAgent")
-
-            cookies = await context.cookies(url)
-            cookie_value = None
-
-            for cookie in cookies:
-                if cookie.get("name") == "cf_clearance":
-                    cookie_value = cookie.get("value")
-                    break
-
-            if cookie_value is None:
-                return None
-
-        logging.getLogger(__name__).debug(
-            "[Camoufox] Cloudflare cookies obtained for user agent (%s): %s",
-            user_agent,
-            cookie_value,
-        )
-
-        return user_agent, cookie_value
-    except Error:
-        logging.getLogger(__name__).exception(
-            "[Camoufox] Failed to get cloudflare cookies due to camoufox error"
-        )
-        return None
